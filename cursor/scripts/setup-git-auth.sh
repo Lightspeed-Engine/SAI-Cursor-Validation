@@ -31,8 +31,7 @@ else
 fi
 
 # Repo-local only — does not touch global git config.
-git config --local credential.helper ""
-git config --local --add credential.helper "$HELPER"
+git config --local --replace-all credential.helper "$HELPER"
 git config --local credential.useHttpPath true
 
 NAME="${GIT_USER_NAME:-Lightspeed Engine}"

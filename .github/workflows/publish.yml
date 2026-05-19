@@ -67,8 +67,8 @@ jobs:
     name: Publish to OpenVSX
     needs: build-vsix
     runs-on: ubuntu-latest
-    # Runs when repository secret OPEN_VSX_TOKEN is set (Personal Access Token from open-vsx.org).
-    if: ${{ secrets.OPEN_VSX_TOKEN != '' }}
+    # Enable when ready: set if: true and add OPEN_VSX_TOKEN secret (secrets cannot be used in job if).
+    if: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
