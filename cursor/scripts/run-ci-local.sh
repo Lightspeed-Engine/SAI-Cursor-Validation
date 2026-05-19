@@ -30,6 +30,9 @@ run_logged() {
     echo "── Phase tests (0–2, includes VSIX verify) ──"
     bash cursor/scripts/run-phase-tests.sh 2
     echo ""
+    echo "── Braid recording gate ──"
+    node --test cursor/scripts/tests/test-braid-recording.js
+    echo ""
     echo "── Coverage ──"
     bash cursor/scripts/run-coverage.sh
     echo ""

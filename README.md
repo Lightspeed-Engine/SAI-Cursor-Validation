@@ -43,6 +43,8 @@ Then every `git commit`:
 
 Skip hooks once: `git commit --no-verify` · Disable push only: `git config --local activity.autoPush false` · Manual: `npm run ci:local`
 
+**Recording (default OFF):** `bash cursor/scripts/start-core-daemons.sh` then in Cursor **Activity: Start Recording** (or status bar `Rec OFF`). See [DESIGN-core-braid-aardvark.md](cursor/DESIGN-core-braid-aardvark.md).
+
 This repository delivers **Cursor Activity Correlator**: hooks append a project-local audit log (`.cursor/activity/activity.jsonl`); the **cursor-activity** VSIX shows what happened—tools, shell, edits—as the Agent runs. Same evidence-oriented goal as Claude Governor, adapted for Cursor (**no container**; hooks + log + extension).
 
 ---

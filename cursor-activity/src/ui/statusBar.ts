@@ -6,6 +6,8 @@ export class ActivityStatusBar implements vscode.Disposable {
   private readonly sessionItem: vscode.StatusBarItem;
   private readonly countItem: vscode.StatusBarItem;
   private readonly logItem: vscode.StatusBarItem;
+  private readonly recordItem: vscode.StatusBarItem;
+  private recordingOn = false;
 
   constructor(
     private readonly store: ActivityStore,
@@ -23,15 +25,29 @@ export class ActivityStatusBar implements vscode.Disposable {
       vscode.StatusBarAlignment.Left,
       88
     );
+    this.recordItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      91
+    );
 
     this.sessionItem.command = 'cursorActivity.refresh';
     this.countItem.command = 'cursorActivity.refresh';
     this.logItem.command = 'cursorActivity.openLog';
+    this.recordItem.command = 'cursorActivity.recordingStatus';
 
     this.render();
     this.sessionItem.show();
     this.countItem.show();
     this.logItem.show();
+    this.recordItem.show();
+  }
+
+  setRecording(active: boolean): void {
+    this.recordingOn = active;
+    this.recordItem.command = active
+      ? 'cursorActivity.stopRecording'
+      : 'cursorActivity.startRecording';
+    this.render();
   }
 
   updateLogPath(logPath: string): void {
@@ -53,11 +69,21 @@ export class ActivityStatusBar implements vscode.Disposable {
         : this.logPath;
     this.logItem.text = `$(file-text) ${shortLog}`;
     this.logItem.tooltip = this.logPath;
+    this.recordItem.text = this.recordingOn
+      ? '$(debug-stop) Rec ON'
+      : '$(record) Rec OFF';
+    this.recordItem.tooltip = this.recordingOn
+      ? 'Stop recording (braid)'
+      : 'Start recording (braid)';
+    this.recordItem.backgroundColor = this.recordingOn
+      ? new vscode.ThemeColor('statusBarItem.warningBackground')
+      : undefined;
   }
 
   dispose(): void {
     this.sessionItem.dispose();
     this.countItem.dispose();
     this.logItem.dispose();
+    this.recordItem.dispose();
   }
 }

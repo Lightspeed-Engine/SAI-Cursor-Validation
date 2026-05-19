@@ -149,7 +149,11 @@ describe('append-activity helpers', () => {
       conversation_id: 'conv-cli',
       file: 'README.md',
     });
-    const env = { ...process.env, ACTIVITY_PROJECT_ROOT: dir };
+    const env = {
+      ...process.env,
+      ACTIVITY_PROJECT_ROOT: dir,
+      ACTIVITY_LEGACY_DIRECT: '1',
+    };
     delete env.ACTIVITY_LOG_PATH;
     const result = spawnSync('node', [script], {
       input: payload,

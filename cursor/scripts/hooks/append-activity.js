@@ -137,6 +137,30 @@ function hookOutputFor(input) {
   return JSON.stringify({});
 }
 
+async function deliverRecord(root, record) {
+  if (process.env.ACTIVITY_LEGACY_DIRECT === '1') {
+    appendLine(resolveLogPath(root), record);
+    return;
+  }
+  const braidUrl = process.env.BRAID_URL || 'http://127.0.0.1:4711';
+  try {
+    const res = await fetch(`${braidUrl}/v1/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ event: record }),
+      signal: AbortSignal.timeout(Number(process.env.BRAID_TIMEOUT_MS || 500)),
+    });
+    if (res.status === 204 || res.ok) {
+      return;
+    }
+  } catch {
+    /* braid offline */
+  }
+  if (process.env.ACTIVITY_BRAID_FAIL_OPEN === '1') {
+    appendLine(resolveLogPath(root), record);
+  }
+}
+
 async function main() {
   const input = await readStdin();
   if (!input) {
@@ -147,7 +171,7 @@ async function main() {
   const root = projectRoot();
   const record = buildRecord(input);
 
-  appendLine(resolveLogPath(root), record);
+  await deliverRecord(root, record);
 
   if (process.env.ACTIVITY_SPIKE_ENABLED === '1') {
     appendLine(resolveSpikePath(root), {
@@ -172,6 +196,7 @@ module.exports = {
   resolveLogPath,
   resolveSpikePath,
   resolveTimestamp,
+  deliverRecord,
   main,
 };
 

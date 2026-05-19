@@ -1,0 +1,17 @@
+{
+  "name": "@sai/aardvark",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP observe proxy with port registry — forwards metadata to braid when recording",
+  "type": "commonjs",
+  "main": "lib/index.js",
+  "bin": {
+    "sai-aardvark": "bin/aardvark.js"
+  },
+  "scripts": {
+    "start": "node bin/aardvark.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

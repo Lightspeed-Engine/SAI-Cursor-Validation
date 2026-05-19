@@ -6,6 +6,8 @@ import { ActivityLogTailer } from './activity/tailer';
 import { InstructionContextProvider } from './ui/contextPanel';
 import { ActivityStatusBar } from './ui/statusBar';
 import { TimelineWebviewProvider } from './ui/timelinePanel';
+import { registerRecordingCommands } from './braid/recordingCommands';
+import { getRecordingStatus, checkBraidHealth } from './braid/client';
 
 let store: ActivityStore;
 let tailer: ActivityLogTailer | undefined;
@@ -24,6 +26,27 @@ export function activate(context: vscode.ExtensionContext): void {
     : '(no workspace)';
 
   statusBar = new ActivityStatusBar(store, initialLog);
+
+  async function refreshRecordingStatus(): Promise<void> {
+    if (!(await checkBraidHealth())) {
+      statusBar.setRecording(false);
+      return;
+    }
+    try {
+      const s = await getRecordingStatus();
+      statusBar.setRecording(s.recording);
+    } catch {
+      statusBar.setRecording(false);
+    }
+  }
+
+  void refreshRecordingStatus();
+
+  registerRecordingCommands(context, () => {
+    void refreshRecordingStatus();
+    tailer?.reload();
+    timelineProvider.render();
+  });
 
   context.subscriptions.push(
     statusBar,

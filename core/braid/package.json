@@ -1,0 +1,17 @@
+{
+  "name": "@sai/braid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-source activity braid — recording gate, JSONL, ingest API",
+  "type": "commonjs",
+  "main": "lib/index.js",
+  "bin": {
+    "sai-braid": "bin/braid.js"
+  },
+  "scripts": {
+    "start": "node bin/braid.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

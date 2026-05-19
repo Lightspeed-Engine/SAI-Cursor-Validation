@@ -35,6 +35,16 @@
           "minimum": 100,
           "maximum": 50000,
           "description": "In-memory ring buffer size for timeline events"
+        },
+        "cursorActivity.braidUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4711",
+          "description": "sAI braid daemon (recording gate + JSONL)"
+        },
+        "cursorActivity.aardvarkUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4712",
+          "description": "sAI aardvark control API (optional HTTP proxy ports)"
         }
       }
     },
@@ -88,6 +98,20 @@
       {
         "command": "cursorActivity.clearFilters",
         "title": "Activity: Clear Timeline Filters"
+      },
+      {
+        "command": "cursorActivity.startRecording",
+        "title": "Activity: Start Recording",
+        "icon": "$(record)"
+      },
+      {
+        "command": "cursorActivity.stopRecording",
+        "title": "Activity: Stop Recording",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "cursorActivity.recordingStatus",
+        "title": "Activity: Recording Status"
       }
     ],
     "menus": {
@@ -101,6 +125,16 @@
           "command": "cursorActivity.openLog",
           "when": "view == cursorActivity.timeline",
           "group": "navigation"
+        },
+        {
+          "command": "cursorActivity.startRecording",
+          "when": "view == cursorActivity.timeline",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cursorActivity.stopRecording",
+          "when": "view == cursorActivity.timeline",
+          "group": "navigation@1"
         }
       ],
       "commandPalette": [
