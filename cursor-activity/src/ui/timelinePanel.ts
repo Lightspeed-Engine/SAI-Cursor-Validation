@@ -81,7 +81,8 @@ function buildTimelineHtml(
   <style>
     body { font-family: var(--vscode-font-family); font-size: 12px; color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; padding: 8px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
-    select { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 4px; }
+    select, button { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 6px; font-size: 12px; cursor: pointer; }
+    button:hover { background: var(--vscode-toolbar-hoverBackground); }
     table { width: 100%; border-collapse: collapse; }
     th { text-align: left; border-bottom: 1px solid var(--vscode-panel-border); padding: 4px; position: sticky; top: 0; background: var(--vscode-editor-background); }
     td { padding: 3px 4px; border-bottom: 1px solid var(--vscode-widget-border); vertical-align: top; }
@@ -100,6 +101,7 @@ function buildTimelineHtml(
     <label>Session <select id="fSession">${sessionOpts}</select></label>
     <label>Type <select id="fType">${typeOpts}</select></label>
     <label>Source <select id="fSource">${sourceOpts}</select></label>
+    <button type="button" id="clearFilters">Clear</button>
     <span id="count">${events.length} events</span>
   </div>
   ${
@@ -112,15 +114,22 @@ function buildTimelineHtml(
   }
   <script>
     const vscode = acquireVsCodeApi();
-    document.querySelectorAll('select').forEach((el) => {
-      el.addEventListener('change', () => {
-        vscode.postMessage({
-          type: 'filter',
-          sessionId: document.getElementById('fSession').value,
-          filterType: document.getElementById('fType').value,
-          source: document.getElementById('fSource').value,
-        });
+    function postFilters() {
+      vscode.postMessage({
+        type: 'filter',
+        sessionId: document.getElementById('fSession').value,
+        filterType: document.getElementById('fType').value,
+        source: document.getElementById('fSource').value,
       });
+    }
+    document.querySelectorAll('select').forEach((el) => {
+      el.addEventListener('change', postFilters);
+    });
+    document.getElementById('clearFilters')?.addEventListener('click', () => {
+      document.getElementById('fSession').value = '';
+      document.getElementById('fType').value = '';
+      document.getElementById('fSource').value = '';
+      postFilters();
     });
     document.querySelectorAll('tr.row').forEach((row) => {
       row.addEventListener('click', () => row.nextElementSibling?.classList.toggle('open'));
@@ -135,6 +144,20 @@ export class TimelineWebviewProvider implements vscode.WebviewViewProvider {
   private filters: ActivityFilters = {};
 
   constructor(private readonly store: ActivityStore) {}
+
+  getFilters(): ActivityFilters {
+    return { ...this.filters };
+  }
+
+  setFilters(filters: ActivityFilters): void {
+    this.filters = { ...filters };
+    this.render();
+  }
+
+  clearFilters(): void {
+    this.filters = {};
+    this.render();
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,

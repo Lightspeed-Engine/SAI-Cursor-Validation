@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# Run before every commit: phase tests + coverage gate (default 85%).
+# Block commit unless local CI passes (phase tests + VSIX + coverage).
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
-echo "pre-commit: phase tests (0–2)..."
-bash cursor/scripts/run-phase-tests.sh 2
+MARKER="${ROOT}/.git/activity-hook-passed"
+rm -f "$MARKER"
 
-echo "pre-commit: coverage (min ${COVERAGE_MIN:-85}%)..."
-bash cursor/scripts/run-coverage.sh
+echo "pre-commit: running local CI (tests + VSIX + coverage)..."
+if ! bash "$ROOT/cursor/scripts/run-ci-local.sh"; then
+  echo ""
+  echo "pre-commit: FAILED — commit blocked. Fix errors above or use: git commit --no-verify" >&2
+  exit 1
+fi
 
-echo "pre-commit: OK"
+touch "$MARKER"
+echo "pre-commit: OK — post-commit will push if activity.autoPush is enabled"

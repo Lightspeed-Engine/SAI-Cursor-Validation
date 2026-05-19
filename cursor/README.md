@@ -67,7 +67,7 @@ bash cursor/scripts/run-phase-tests.sh 1    # phases 0 + 1 only
 ACTIVITY_REQUIRE_LIVE=1 bash cursor/scripts/run-phase-tests.sh 1
 ```
 
-**CI:** GitHub Actions (`.github/workflows/activity-correlator.yml`) or GitLab (`.gitlab-ci.yml` at repo root). Both run the same `run-phase-tests.sh 2` on push/PR. Use one host; delete or ignore the other file if unused.
+**CI:** GitHub Actions (`.github/workflows/activity-correlator.yml`) runs `run-phase-tests.sh 2` (includes **VSIX build + `verify-vsix.sh`**), then coverage (≥85%). Artifacts: `cursor-activity-vsix`, `coverage-report`.
 
 **Live log report only:**
 

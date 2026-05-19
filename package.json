@@ -3,6 +3,7 @@
   "private": true,
   "description": "Root tooling for hook kit coverage (not published to npm)",
   "scripts": {
+    "ci:local": "bash cursor/scripts/run-ci-local.sh",
     "test:coverage": "bash cursor/scripts/run-coverage.sh"
   },
   "devDependencies": {

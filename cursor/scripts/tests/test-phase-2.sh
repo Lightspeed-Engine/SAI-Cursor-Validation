@@ -46,5 +46,8 @@ check $? "package.json contributes"
 node "$SCRIPT_DIR/test-schema-parse.js"
 check $? "parse live log lines (or skip if no log)"
 
+bash "$SCRIPT_DIR/verify-vsix.sh"
+check $? "npm run package + VSIX contents"
+
 echo "Phase 2: $((fail)) failure(s)"
 exit "$fail"

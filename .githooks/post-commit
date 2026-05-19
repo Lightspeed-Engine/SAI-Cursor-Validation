@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# After a commit that passed pre-commit: push to origin so GitHub CI runs.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+MARKER="${ROOT}/.git/activity-hook-passed"
+if [[ ! -f "$MARKER" ]]; then
+  echo "post-commit: skip push (pre-commit did not run or used --no-verify)"
+  exit 0
+fi
+rm -f "$MARKER"
+
+echo ""
+echo "post-commit: pushing to GitHub (activity.autoPush)..."
+if bash "$ROOT/cursor/scripts/auto-push.sh"; then
+  exit 0
+fi
+
+echo "post-commit: push failed — commit is saved locally." >&2
+echo "  Fix auth: bash cursor/scripts/setup-git-auth.sh" >&2
+echo "  Retry:    bash cursor/scripts/auto-push.sh" >&2
+exit 0

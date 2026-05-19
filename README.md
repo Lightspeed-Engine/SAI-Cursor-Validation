@@ -28,7 +28,20 @@
 
 **Agents / devs pushing from this clone:** one-time [git auth setup](cursor/GIT-AUTH.md) via `.env.local` (not committed).
 
-**Pre-commit (tests + 85% coverage):** `bash cursor/scripts/install-git-hooks.sh` — blocks commits that fail phase tests or coverage. Skip once: `git commit --no-verify`.
+**Automated commit pipeline (recommended):**
+
+```bash
+bash cursor/scripts/install-git-hooks.sh   # once per clone
+cp .env.local.example .env.local           # GITHUB_TOKEN for auto-push
+bash cursor/scripts/setup-git-auth.sh
+```
+
+Then every `git commit`:
+
+1. **Local CI** — phase tests 0–2, VSIX verify, coverage ≥85% (`reports/ci-local-latest.txt`)
+2. **Auto-push** to `origin` → [GitHub Actions](https://github.com/Lightspeed-Engine/SAI-Cursor-Validation/actions) runs the same gates
+
+Skip hooks once: `git commit --no-verify` · Disable push only: `git config --local activity.autoPush false` · Manual: `npm run ci:local`
 
 This repository delivers **Cursor Activity Correlator**: hooks append a project-local audit log (`.cursor/activity/activity.jsonl`); the **cursor-activity** VSIX shows what happened—tools, shell, edits—as the Agent runs. Same evidence-oriented goal as Claude Governor, adapted for Cursor (**no container**; hooks + log + extension).
 

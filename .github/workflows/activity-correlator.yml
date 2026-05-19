@@ -1,6 +1,7 @@
 # Governed Activity Correlator — cumulative phase tests (0–2) on every PR/push.
 # Release publish (GitHub Release + OpenVSX + npm): see publish.yml on version tags.
-# Structural + compile + redact always run. validate-live skips if no activity.jsonl.
+# Structural + compile + VSIX package verify + redact/coverage always run.
+# validate-live skips if no activity.jsonl.
 # Full live gate: run ACTIVITY_REQUIRE_LIVE=1 on a machine with Cursor Agent history,
 # or use the manual workflow_dispatch option below.
 
@@ -61,7 +62,7 @@ jobs:
         working-directory: cursor-activity
 
       - name: Ensure hook wrapper is executable
-        run: chmod +x .cursor/hooks/append-activity.sh cursor/scripts/hooks/*.sh cursor/scripts/tests/*.sh cursor/scripts/run-phase-tests.sh
+        run: chmod +x .cursor/hooks/append-activity.sh cursor/scripts/hooks/*.sh cursor/scripts/tests/*.sh cursor/scripts/run-phase-tests.sh cursor/scripts/tests/verify-vsix.sh
 
       - name: Run cumulative phase tests
         env:
@@ -70,6 +71,14 @@ jobs:
 
       - name: Coverage report
         run: bash cursor/scripts/run-coverage.sh
+
+      - name: Upload VSIX artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cursor-activity-vsix
+          path: cursor-activity/*.vsix
+          if-no-files-found: error
 
       - name: Upload coverage artifacts
         if: always()

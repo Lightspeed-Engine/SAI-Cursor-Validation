@@ -18,15 +18,23 @@ bash cursor/scripts/setup-git-auth.sh
 
 ## Agent usage
 
-After setup, agents may run:
+After `bash cursor/scripts/install-git-hooks.sh`, a normal commit runs local CI and **auto-pushes** when tests pass:
 
 ```bash
-bash cursor/scripts/push-to-github.sh    # PUSH_YES=1 for non-interactive
-bash cursor/scripts/run-phase-tests.sh 2
+git add -A && git commit -m "your message"
+# → run-ci-local.sh → push → GitHub Actions
+```
+
+Manual commands:
+
+```bash
+bash cursor/scripts/run-ci-local.sh      # full report without committing
+bash cursor/scripts/auto-push.sh         # push only
+bash cursor/scripts/push-to-github.sh    # PUSH_YES=1, force-with-lease if needed
 bash cursor/scripts/release.sh
 ```
 
-`push-to-github.sh` calls `setup-git-auth.sh` automatically when `.env.local` exists.
+`auto-push.sh` and `push-to-github.sh` call `setup-git-auth.sh` when `.env.local` exists.
 
 ## Security
 

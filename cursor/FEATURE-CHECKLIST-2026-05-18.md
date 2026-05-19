@@ -1,8 +1,8 @@
 # Feature checklist — by phase
 
 **Purpose:** What you expect at the end of each phase.  
-**Automated gate:** `bash cursor/scripts/run-phase-tests.sh` (must pass before calling a phase done). Same command runs in **GitHub Actions** or **GitLab CI** on push/PR.  
-**Manual sign-off:** You still tick items you verified in Cursor.
+**Automated gate:** `bash cursor/scripts/run-phase-tests.sh` (must pass before calling a phase done). Includes **VSIX build + archive verify** (`verify-vsix.sh`). Coverage: `bash cursor/scripts/run-coverage.sh` (≥85% default). Same commands run in **GitHub Actions** on push/PR.  
+**Manual sign-off:** Optional spot-check in Cursor (F5 / Install from VSIX); not required if CI is green.
 
 **Not confusing:** Items are numbered **inside each phase** (Phase 1 → 1.1, 1.2, …). There is no separate “B1 = Phase 0” mapping.
 
@@ -60,7 +60,7 @@ Same end goal as **Claude Governor**, adapted for **Cursor**:
 | # | Deliverable / expectation | Auto test | You |
 |---|---------------------------|-----------|-----|
 | 2.1 | Package `cursor-activity/` compiles | `test-phase-2.sh` | [ ] |
-| 2.2 | Produces `.vsix` (`npm run package`) | Manual / CI | [ ] |
+| 2.2 | Produces `.vsix` (`npm run package`) | `verify-vsix.sh` in `test-phase-2.sh` | [ ] |
 | 2.3 | **Activity** sidebar → **Timeline** webview | Manual F5 / VSIX | [ ] |
 | 2.4 | Timeline updates live during Agent session | Manual | [ ] |
 | 2.5 | Filter by session / type / source | Manual | [ ] |

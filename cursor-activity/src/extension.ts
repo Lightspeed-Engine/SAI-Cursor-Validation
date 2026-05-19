@@ -92,14 +92,24 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showWarningMessage('No sessions in activity log yet.');
         return;
       }
-      const pick = await vscode.window.showQuickPick(sessions, {
-        placeHolder: 'Filter timeline by session (use sidebar dropdowns after pick)',
+      const items = sessions.map((id) => ({
+        label: id.length > 12 ? `${id.slice(0, 12)}…` : id,
+        description: id,
+        id,
+      }));
+      const pick = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Filter timeline by session',
+        matchOnDescription: true,
       });
       if (pick) {
-        void vscode.window.showInformationMessage(
-          `Session ${pick.slice(0, 8)}… — select it in the Activity timeline filters.`
+        timelineProvider.setFilters({ sessionId: pick.id });
+        await vscode.commands.executeCommand(
+          'workbench.view.extension.cursor-activity'
         );
       }
+    }),
+    vscode.commands.registerCommand('cursorActivity.clearFilters', () => {
+      timelineProvider.clearFilters();
     })
   );
 }

@@ -26,3 +26,6 @@ secrets/
 
 # Coverage reports (CI artifact + local HTML)
 coverage/
+
+# Local CI transcript (regenerated each pre-commit)
+reports/
