@@ -1,0 +1,20 @@
+node_modules/
+**/node_modules/
+
+*.log
+.DS_Store
+
+# Local audit log (sensitive)
+.cursor/activity/
+
+# Build outputs — CI produces artifacts; install from Release or OpenVSX
+**/dist/
+**/out/
+*.vsix
+
+__pycache__/
+.venv/
+venv/
+
+.env
+.env.*

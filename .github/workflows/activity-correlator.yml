@@ -1,0 +1,67 @@
+# Governed Activity Correlator — cumulative phase tests (0–2) on every PR/push.
+# Release publish (GitHub Release + OpenVSX + npm): see publish.yml on version tags.
+# Structural + compile + redact always run. validate-live skips if no activity.jsonl.
+# Full live gate: run ACTIVITY_REQUIRE_LIVE=1 on a machine with Cursor Agent history,
+# or use the manual workflow_dispatch option below.
+
+name: Activity Correlator
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'cursor/**'
+      - 'cursor-activity/**'
+      - '.cursor/hooks.json'
+      - '.cursor/hooks/**'
+      - '.gitignore'
+      - '.github/workflows/activity-correlator.yml'
+  pull_request:
+    paths:
+      - 'cursor/**'
+      - 'cursor-activity/**'
+      - '.cursor/hooks.json'
+      - '.cursor/hooks/**'
+      - '.gitignore'
+      - '.github/workflows/activity-correlator.yml'
+  workflow_dispatch:
+    inputs:
+      require_live_log:
+        description: 'Fail if no live .cursor/activity/activity.jsonl'
+        type: boolean
+        default: false
+      max_phase:
+        description: 'Highest phase to run (0–2)'
+        type: string
+        default: '2'
+
+jobs:
+  phase-tests:
+    name: Phase tests (0–2 regression)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: cursor-activity/package-lock.json
+
+      - name: Install cursor-activity dependencies
+        run: npm ci
+        working-directory: cursor-activity
+
+      - name: Ensure hook wrapper is executable
+        run: chmod +x .cursor/hooks/append-activity.sh cursor/scripts/hooks/*.sh cursor/scripts/tests/*.sh cursor/scripts/run-phase-tests.sh
+
+      - name: Run cumulative phase tests
+        env:
+          ACTIVITY_REQUIRE_LIVE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.require_live_log == 'true' && '1' || '0' }}
+        run: bash cursor/scripts/run-phase-tests.sh ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.max_phase || '2' }}

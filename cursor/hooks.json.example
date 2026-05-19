@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "sessionEnd": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "postToolUse": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "postToolUseFailure": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "afterShellExecution": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "afterFileEdit": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "beforeSubmitPrompt": [{ "command": ".cursor/hooks/append-activity.sh" }],
+    "afterAgentResponse": [{ "command": ".cursor/hooks/append-activity.sh" }]
+  }
+}

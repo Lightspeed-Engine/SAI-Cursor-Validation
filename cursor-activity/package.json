@@ -1,0 +1,126 @@
+{
+  "name": "cursor-activity",
+  "displayName": "Cursor Activity Correlator",
+  "description": "Live operational truth timeline from Cursor hooks activity.jsonl",
+  "version": "0.1.0",
+  "publisher": "lightspeed-engine",
+  "icon": "media/icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lightspeed-Engine/SAI-Cursor-Validation.git"
+  },
+  "homepage": "https://github.com/Lightspeed-Engine/SAI-Cursor-Validation#readme",
+  "bugs": {
+    "url": "https://github.com/Lightspeed-Engine/SAI-Cursor-Validation/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Cursor Activity",
+      "properties": {
+        "cursorActivity.logPath": {
+          "type": "string",
+          "default": "",
+          "description": "Override path to activity.jsonl (default: <workspace>/.cursor/activity/activity.jsonl)"
+        },
+        "cursorActivity.maxEvents": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "In-memory ring buffer size for timeline events"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cursor-activity",
+          "title": "Activity",
+          "icon": "$(list-unordered)"
+        }
+      ]
+    },
+    "views": {
+      "cursor-activity": [
+        {
+          "id": "cursorActivity.timeline",
+          "name": "Timeline",
+          "type": "webview"
+        },
+        {
+          "id": "cursorActivity.context",
+          "name": "Instruction Context"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cursorActivity.refresh",
+        "title": "Activity: Refresh Timeline",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cursorActivity.openLog",
+        "title": "Activity: Open activity.jsonl",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "cursorActivity.sampleGitStatus",
+        "title": "Governance: Sample Git Status",
+        "category": "Governance"
+      },
+      {
+        "command": "cursorActivity.sampleGitDiff",
+        "title": "Governance: Sample Git Diff",
+        "category": "Governance"
+      },
+      {
+        "command": "cursorActivity.filterSession",
+        "title": "Activity: Filter by Session…"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cursorActivity.refresh",
+          "when": "view == cursorActivity.timeline",
+          "group": "navigation"
+        },
+        {
+          "command": "cursorActivity.openLog",
+          "when": "view == cursorActivity.timeline",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "cursorActivity.sampleGitStatus",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "cursorActivity.sampleGitDiff",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "typescript": "^5.4.0"
+  }
+}
