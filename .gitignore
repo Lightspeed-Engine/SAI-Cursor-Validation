@@ -17,4 +17,9 @@ __pycache__/
 venv/
 
 .env
-.env.*
+.env.local
+.env.*.local
+!.env.local.example
+
+# Optional deploy key (never commit)
+secrets/

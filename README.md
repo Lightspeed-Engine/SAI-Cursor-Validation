@@ -26,6 +26,8 @@
 
 **sAI Solvrighn AI** · [github.com/Lightspeed-Engine/SAI-Cursor-Validation](https://github.com/Lightspeed-Engine/SAI-Cursor-Validation)
 
+**Agents / devs pushing from this clone:** one-time [git auth setup](cursor/GIT-AUTH.md) via `.env.local` (not committed).
+
 This repository delivers **Cursor Activity Correlator**: hooks append a project-local audit log (`.cursor/activity/activity.jsonl`); the **cursor-activity** VSIX shows what happened—tools, shell, edits—as the Agent runs. Same evidence-oriented goal as Claude Governor, adapted for Cursor (**no container**; hooks + log + extension).
 
 ---

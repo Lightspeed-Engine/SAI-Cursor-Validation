@@ -5,6 +5,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib/source-env.sh
+source "$(dirname "$0")/lib/source-env.sh"
+if [[ -f "$ROOT/.env.local" ]]; then
+  bash "$ROOT/cursor/scripts/setup-git-auth.sh"
+fi
+
 REMOTE="${1:-origin}"
 URL="${2:-https://github.com/Lightspeed-Engine/SAI-Cursor-Validation.git}"
 

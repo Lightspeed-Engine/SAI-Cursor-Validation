@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=lib/source-env.sh
+source "$(dirname "$0")/lib/source-env.sh"
 PKG="$ROOT/cursor-activity/package.json"
 VERSION_FILE="$ROOT/VERSION"
 
