@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Run before every commit: phase tests + coverage gate (default 85%).
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "pre-commit: phase tests (0–2)..."
+bash cursor/scripts/run-phase-tests.sh 2
+
+echo "pre-commit: coverage (min ${COVERAGE_MIN:-85}%)..."
+bash cursor/scripts/run-coverage.sh
+
+echo "pre-commit: OK"

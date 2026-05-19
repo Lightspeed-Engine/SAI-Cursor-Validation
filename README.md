@@ -28,6 +28,8 @@
 
 **Agents / devs pushing from this clone:** one-time [git auth setup](cursor/GIT-AUTH.md) via `.env.local` (not committed).
 
+**Pre-commit (tests + 85% coverage):** `bash cursor/scripts/install-git-hooks.sh` — blocks commits that fail phase tests or coverage. Skip once: `git commit --no-verify`.
+
 This repository delivers **Cursor Activity Correlator**: hooks append a project-local audit log (`.cursor/activity/activity.jsonl`); the **cursor-activity** VSIX shows what happened—tools, shell, edits—as the Agent runs. Same evidence-oriented goal as Claude Governor, adapted for Cursor (**no container**; hooks + log + extension).
 
 ---

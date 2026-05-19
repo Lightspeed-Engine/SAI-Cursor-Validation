@@ -23,3 +23,6 @@ venv/
 
 # Optional deploy key (never commit)
 secrets/
+
+# Coverage reports (CI artifact + local HTML)
+coverage/

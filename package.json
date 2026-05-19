@@ -1,0 +1,11 @@
+{
+  "name": "sai-cursor-validation",
+  "private": true,
+  "description": "Root tooling for hook kit coverage (not published to npm)",
+  "scripts": {
+    "test:coverage": "bash cursor/scripts/run-coverage.sh"
+  },
+  "devDependencies": {
+    "c8": "^10.1.3"
+  }
+}

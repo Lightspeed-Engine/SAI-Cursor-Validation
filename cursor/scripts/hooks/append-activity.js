@@ -159,8 +159,26 @@ async function main() {
   process.stdout.write(hookOutputFor(input));
 }
 
-main().catch((err) => {
-  console.error('[append-activity]', err.message);
-  process.stdout.write('{}');
-  process.exit(0);
-});
+module.exports = {
+  SCHEMA_VERSION,
+  readStdin,
+  deriveAgentKey,
+  deriveSessionId,
+  mapEventType,
+  buildRecord,
+  appendLine,
+  hookOutputFor,
+  projectRoot,
+  resolveLogPath,
+  resolveSpikePath,
+  resolveTimestamp,
+  main,
+};
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('[append-activity]', err.message);
+    process.stdout.write('{}');
+    process.exit(0);
+  });
+}
