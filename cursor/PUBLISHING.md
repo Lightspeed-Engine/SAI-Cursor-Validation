@@ -45,7 +45,14 @@ GitLab mirrors the same stages in `.gitlab-ci.yml` (`publish` stage, manual Open
 1. Bump `version` in `cursor-activity/package.json`.
 2. `cd cursor-activity && npm ci && npm run compile && npm run package`
 3. `bash ../cursor/scripts/run-phase-tests.sh 2`
-4. `git tag cursor-activity-v0.1.0 && git push origin cursor-activity-v0.1.0`
+4. `bash cursor/scripts/release.sh 0.1.0` then `git push origin main && git push origin cursor-activity-v0.1.0`
+
+**First-time remote sync** (GitHub repo created with README/LICENSE only):
+
+```bash
+bash cursor/scripts/push-to-github.sh
+# or: PUSH_YES=1 bash cursor/scripts/push-to-github.sh
+```
 5. CI creates GitHub Release with VSIX; OpenVSX runs if token is set.
 
 ## Hooks (v0)
