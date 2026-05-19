@@ -24,7 +24,7 @@ jobs:
           cache-dependency-path: cursor-activity/package-lock.json
       - run: npm ci
         working-directory: cursor-activity
-      - run: chmod +x .cursor/hooks/append-activity.sh cursor/scripts/**/*.sh cursor/scripts/run-phase-tests.sh || true
+      - run: chmod +x .cursor/hooks/append-activity.sh cursor/scripts/hooks/*.sh cursor/scripts/tests/*.sh cursor/scripts/run-phase-tests.sh cursor/scripts/validate-live.sh || true
       - run: bash cursor/scripts/run-phase-tests.sh 2
 
   build-vsix:
@@ -56,6 +56,8 @@ jobs:
           path: dist
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Cursor Activity ${{ github.ref_name }}
           files: dist/*.vsix
           generate_release_notes: true
 

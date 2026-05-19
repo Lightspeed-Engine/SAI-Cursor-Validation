@@ -9,6 +9,8 @@ name: Activity Correlator
 on:
   push:
     branches: [main, master]
+    tags:
+      - 'cursor-activity-v*'
     paths:
       - 'cursor/**'
       - 'cursor-activity/**'
