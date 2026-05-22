@@ -2,7 +2,22 @@
 
 Pin a release with `git tag shufti-map-<version>` after updating `VERSION` and syncing `viewer/` + `upstream/shufti_ui/topology-map-viewer.html` from Lightspeed deploy path.
 
-## 2026.05.22-v3.2 (current)
+## 2026.05.22-v3.6-focus (current, tag `shufti-map-2026.05.22-v3.6-focus`)
+
+- **Parallel strands:** import weight → up to 12 lines per coupling (reference image semantics)
+- **Relation layers:** Coupling (violet) / External hub (dashed) / Inheritance (green, when topology emits)
+- **Focus:** dim off-path boxes and edges; accent via Focus color; click sidebar coupling row → single-path highlight
+- **Sidebar half-drill-down:** Coupling + Imports by file + AI agent slots; map boxes title-only by default
+- **Line legend** in controls; `dimOnFocus` on by default
+- External edges collapsed to hub (performance); orthogonal backward routes retained
+
+## 2026.05.22-v3.3-deps
+
+- Topology **1.2.0**: `edges.external`, `edges.unresolved`, `dependency_layers`, per-file `imports` in drill-downs (`shufti_code_topology.py`)
+- Viewer: toggles **Internal coupling** vs **External/stdlib** (hub node on right); unresolved imports in sidebar (not map lines)
+- Research doc: `docs/RESEARCH-2026-05-21-shufti-api-route-detection.md` (API/OpenAPI feasibility — out of scope until next phase)
+
+## 2026.05.22-v3.2 (tag `shufti-map-2026.05.22-v3.2`)
 
 - **Edges visible:** draw above boxes by default; brighter SVG strokes; backward imports use curved routes
 - **Dim non-neighbors** off by default (was confusing on open); only dims when selection has connected edges

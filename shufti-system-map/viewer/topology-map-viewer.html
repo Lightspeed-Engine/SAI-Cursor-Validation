@@ -97,14 +97,42 @@
       word-break: break-word;
     }
     .component-fo .box-meta { font-size: 10px; color: #cbd5e1; margin-top: 2px; }
+    .component-fo .agent-slot {
+      color: #a78bfa;
+      font-size: 10px;
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+    .coupling-row {
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+      font-size: 0.8rem;
+      cursor: pointer;
+      border-radius: 8px;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+    .coupling-row:hover { background: rgba(139, 92, 246, 0.12); }
+    .coupling-row.active {
+      background: rgba(251, 191, 36, 0.15);
+      outline: 1px solid rgba(251, 191, 36, 0.45);
+    }
+    .coupling-row strong { display: block; color: var(--text); }
+    .coupling-row span { color: var(--muted); font-size: 0.75rem; }
     .edge {
       fill: none;
-      stroke: rgba(186, 198, 216, 0.92);
       stroke-width: 2;
       stroke-linecap: square;
       stroke-linejoin: round;
       pointer-events: stroke;
     }
+    .map-legend {
+      fill: rgba(15, 23, 42, 0.92);
+      stroke: var(--border);
+      stroke-width: 1;
+    }
+    .map-legend-title { fill: var(--muted); font-size: 10px; font-weight: 600; }
+    .map-legend-item { font-size: 10px; fill: #e2e8f0; }
     .edge-hop {
       fill: none;
       stroke: rgba(148, 163, 184, 0.65);
@@ -223,7 +251,52 @@
     const EDGE_LANE_SPACING = 14;
     const GUTTER_OUT = 22;
     const GUTTER_IN = 22;
-    const VIEWER_BUILD = "2026.05.22-v3.2";
+    const VIEWER_BUILD = "2026.05.22-v3.6-focus";
+    const MAX_STRANDS_PER_COUPLING = 12;
+    const EXTERNAL_HUB_ID = "__external__";
+    /** Default stroke/label per edge relation (inheritance reserved for future topology). */
+    const RELATION_STYLES = {
+      package_import: {
+        label: "Coupling",
+        description: "Cross-component Python imports (aggregated)",
+        stroke: "#c4b5fd",
+        dash: "",
+        pillFill: "#5b21b6",
+        pillStroke: "#a78bfa",
+      },
+      external_import: {
+        label: "External",
+        description: "Third-party or stdlib imports → hub",
+        stroke: "#94a3b8",
+        dash: "7 5",
+        pillFill: "#334155",
+        pillStroke: "#64748b",
+      },
+      imports: {
+        label: "File import",
+        description: "File-level import (drill-down)",
+        stroke: "#22d3ee",
+        dash: "",
+        pillFill: "#164e63",
+        pillStroke: "#22d3ee",
+      },
+      inheritance: {
+        label: "Inherits",
+        description: "Class bases (when enabled in mapper)",
+        stroke: "#4ade80",
+        dash: "5 4",
+        pillFill: "#14532d",
+        pillStroke: "#4ade80",
+      },
+      unresolved_import: {
+        label: "Unresolved",
+        description: "Import could not be resolved locally",
+        stroke: "#fb923c",
+        dash: "4 3",
+        pillFill: "#7c2d12",
+        pillStroke: "#fb923c",
+      },
+    };
     const PREFS_KEY = "shufti-map-viewer-prefs-v2";
     const ROLE_COLORS = {
       gateway: "#7c3aed",
@@ -244,20 +317,24 @@
         grid: false,
         lanes: true,
         edges: true,
-        edgeLabels: true,
+        depInternal: true,
+        depExternal: false,
+        depInheritance: false,
         components: true,
       },
       display: {
         heatFill: true,
         showTitle: true,
-        showFilesLines: true,
-        showDeps: true,
-        showStubs: true,
+        showFilesLines: false,
+        showDeps: false,
+        showStubs: false,
+        showAgentOnSelect: true,
         edgeStyle: "orthogonal",
         edgeWidth: "lg",
         colorMode: "heat",
         focusHighlight: true,
         highlightConnectedEdges: true,
+        dimOnFocus: true,
         dimUnfocused: false,
         focusColor: "#fbbf24",
         componentGlow: true,
@@ -290,6 +367,8 @@
 
     let apiPayload = null;
     let selectedDrilldownId = null;
+    /** When set, focus only this coupling's strands (source → target). */
+    let selectedCouplingRef = null;
     let viewerPrefs = loadPrefs();
 
     function loadPrefs() {
@@ -309,6 +388,8 @@
           parsed.display.dimUnfocused = false;
           parsed.display._dimDefaultV32 = true;
         }
+        if (parsed.layers?.depInternal === undefined) parsed.layers.depInternal = true;
+        if (parsed.layers?.depExternal === undefined) parsed.layers.depExternal = false;
         return deepMerge(structuredClone(DEFAULT_PREFS), parsed);
       } catch {
         return structuredClone(DEFAULT_PREFS);
@@ -351,6 +432,69 @@
       const srcRight = source.layout.x + source.layout.width;
       const tgtLeft = target.layout.x;
       return tgtLeft < srcRight - 4;
+    }
+
+    function relationStyle(relation) {
+      return RELATION_STYLES[relation] || RELATION_STYLES.package_import;
+    }
+
+    function componentLabel(nodeId, nodes) {
+      const n = nodes.find((item) => item.id === nodeId);
+      return n?.label || nodeId;
+    }
+
+    /** One visible line per import path (weight N → N parallel strands), capped for performance. */
+    function expandEdgeStrands(edges) {
+      const out = [];
+      for (const edge of edges) {
+        if (isExternalEdge(edge)) {
+          out.push({
+            ...edge,
+            strandIndex: 0,
+            strandCount: 1,
+            _visualId: `${edge.source}::${edge.target}::ext`,
+          });
+          continue;
+        }
+        const aggregate = Math.max(1, Number(edge.weight) || 1);
+        const strandCount = Math.min(aggregate, MAX_STRANDS_PER_COUPLING);
+        for (let i = 0; i < strandCount; i += 1) {
+          out.push({
+            ...edge,
+            strandIndex: i,
+            strandCount,
+            _aggregateWeight: aggregate,
+            _visualId: `${edge.source}::${edge.target}::${i}`,
+          });
+        }
+      }
+      return out;
+    }
+
+    function orthogonalBackwardPath(source, target, strandIndex, strandCount) {
+      const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+      const spread = (strandIndex - (strandCount - 1) / 2) * EDGE_LANE_SPACING;
+      const portY = snap(sy + spread);
+      const dropY = snap(Math.max(source.layout.y + source.layout.height + 20, ty + 40));
+      const busX = snap(Math.min(source.layout.x, target.layout.x) - 28);
+      return simplifyOrthogonal([
+        [sx, sy],
+        [sx, portY],
+        [sx, dropY],
+        [busX, dropY],
+        [busX, ty],
+        [tx, ty],
+      ]);
+    }
+
+    function edgeLegendHtml() {
+      return Object.entries(RELATION_STYLES)
+        .filter(([key]) => key === "package_import" || key === "external_import" || key === "inheritance")
+        .map(([, style]) => (
+          `<div class="control-row">
+            <span><span class="color-swatch" style="background:${style.stroke}"></span>${style.label}</span>
+          </div>`
+        )).join("");
     }
 
     function showError(message) {
@@ -412,6 +556,20 @@
       return nodes.find((n) => n.drilldown_id === drilldownId);
     }
 
+    function addStrandKeys(edgeKeys, edge) {
+      const strands = Math.min(
+        Math.max(1, Number(edge.weight) || 1),
+        MAX_STRANDS_PER_COUPLING,
+      );
+      for (let i = 0; i < strands; i += 1) {
+        edgeKeys.add(`${edge.source}::${edge.target}::${i}`);
+      }
+    }
+
+    function edgeMatchesCouplingRef(edge, ref) {
+      return ref && edge.source === ref.source && edge.target === ref.target;
+    }
+
     function buildFocusContext(nodes, edges) {
       const display = viewerPrefs.display;
       if (!selectedDrilldownId || display.focusHighlight === false) {
@@ -424,11 +582,16 @@
       const nodeIds = new Set([selected.id]);
       const edgeKeys = new Set();
       for (const edge of edges) {
-        if (edge.source === selected.id || edge.target === selected.id) {
-          edgeKeys.add(`${edge.source}::${edge.target}`);
-          nodeIds.add(edge.source);
-          nodeIds.add(edge.target);
-        }
+        const touches = edge.source === selected.id || edge.target === selected.id;
+        if (!touches) continue;
+        if (selectedCouplingRef && !edgeMatchesCouplingRef(edge, selectedCouplingRef)) continue;
+        addStrandKeys(edgeKeys, edge);
+        nodeIds.add(edge.source);
+        nodeIds.add(edge.target);
+      }
+      if (selectedCouplingRef && edgeKeys.size === 0) {
+        nodeIds.clear();
+        nodeIds.add(selected.id);
       }
       return {
         active: true,
@@ -445,14 +608,94 @@
       )).join("");
     }
 
-    function packageEdgesFromTopology(topology) {
-      const raw = (topology?.edges || {}).packages || [];
-      return raw.map((edge) => ({
+    function normalizeEdge(edge, fallbackRelation) {
+      return {
         source: edge.source,
         target: edge.target,
         weight: edge.weight ?? 1,
-        relation: edge.relation || "package_import",
-      })).filter((edge) => edge.source && edge.target);
+        relation: edge.relation || fallbackRelation,
+        detail: edge.detail || null,
+      };
+    }
+
+    function packageEdgesFromTopology(topology) {
+      const layers = topology?.dependency_layers || {};
+      const raw = layers.package_import || (topology?.edges || {}).packages || [];
+      return raw.map((edge) => normalizeEdge(edge, "package_import"))
+        .filter((edge) => edge.source && edge.target);
+    }
+
+    function externalEdgesFromTopology(topology) {
+      const layers = topology?.dependency_layers || {};
+      const raw = layers.external_import || (topology?.edges || {}).external || [];
+      return raw.map((edge) => normalizeEdge(edge, "external_import"))
+        .filter((edge) => edge.source && edge.target);
+    }
+
+    /** One dashed line per component → hub (avoids 80× A* routes freezing the UI). */
+    function collapseExternalToHub(extEdges) {
+      const bySource = new Map();
+      for (const edge of extEdges) {
+        const source = edge.source;
+        if (!source) continue;
+        const prev = bySource.get(source);
+        const w = Number(edge.weight) || 1;
+        if (!prev) {
+          bySource.set(source, {
+            source,
+            target: EXTERNAL_HUB_ID,
+            weight: w,
+            relation: "external_import",
+            detail: "external/stdlib",
+          });
+        } else {
+          prev.weight += w;
+        }
+      }
+      return [...bySource.values()];
+    }
+
+    function isExternalEdge(edge) {
+      const rel = edge.relation || "package_import";
+      return rel === "external_import"
+        || edge.target === EXTERNAL_HUB_ID
+        || edge.source === EXTERNAL_HUB_ID;
+    }
+
+    function dependencyEdgesFromPayload(payload, nodeIds) {
+      if (viewerPrefs.layers.edges === false) return [];
+      const topo = payload.topology || {};
+      const edges = [];
+      if (viewerPrefs.layers.depInternal !== false) {
+        for (const edge of packageEdgesFromTopology(topo)) {
+          if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) edges.push(edge);
+        }
+      }
+      if (viewerPrefs.layers.depExternal === true) {
+        const collapsed = collapseExternalToHub(externalEdgesFromTopology(topo));
+        for (const edge of collapsed) {
+          if (nodeIds.has(edge.source)) edges.push(edge);
+        }
+      }
+      if (viewerPrefs.layers.depInheritance === true) {
+        const layers = topo?.dependency_layers || {};
+        const raw = layers.inheritance || (topo?.edges || {}).inheritance || [];
+        for (const edge of raw.map((e) => normalizeEdge(e, "inheritance"))) {
+          if (nodeIds.has(e.source) && nodeIds.has(e.target)) edges.push(edge);
+        }
+      }
+      return edges;
+    }
+
+    function externalHubNode(maxX) {
+      return {
+        id: EXTERNAL_HUB_ID,
+        label: "External / stdlib",
+        role: "integration",
+        drilldown_id: "",
+        metrics: { files: 0, lines: 0, stubs: 0, dependency_in: 0, dependency_out: 0 },
+        layout: { x: maxX - 200, y: 36, width: 176, height: 76, lane: "integration", size_band: "sm" },
+      };
     }
 
     function systemMapFromPayload(payload) {
@@ -461,11 +704,12 @@
         || {};
       const nodes = base.nodes || [];
       const nodeIds = new Set(nodes.map((n) => n.id));
-      let edges = base.edges || [];
-      if (!edges.length && payload.topology) {
-        const fromView = (payload.topology.views || {}).system_overview?.edges || [];
-        if (fromView.length) edges = fromView;
-        else {
+      let edges = dependencyEdgesFromPayload(payload, nodeIds);
+      if (!edges.length) {
+        const fallback = base.edges || [];
+        if (fallback.length) {
+          edges = fallback.map((edge) => normalizeEdge(edge, "package_import"));
+        } else if (payload.topology) {
           edges = packageEdgesFromTopology(payload.topology).filter(
             (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
           );
@@ -488,14 +732,20 @@
         <h3>Layers</h3>
         ${controlCheckbox("layers.grid", "Alignment grid (16px)", layer.grid)}
         ${controlCheckbox("layers.lanes", "Role lane headers (Gateway, Service, …)", layer.lanes)}
-        ${controlCheckbox("layers.edges", "Dependency edges", layer.edges)}
-        ${controlCheckbox("layers.edgeLabels", "Edge labels", layer.edgeLabels)}
+        ${controlCheckbox("layers.edges", "Dependency edges (master)", layer.edges)}
+        ${controlCheckbox("layers.depInternal", "Coupling (violet)", layer.depInternal !== false)}
+        ${controlCheckbox("layers.depExternal", "External / stdlib (grey dashed)", layer.depExternal === true)}
+        ${controlCheckbox("layers.depInheritance", "Inheritance (green, when mapper emits)", layer.depInheritance === true)}
+        <p class="hint">Only checked line types are drawn. Focus highlights those paths + linked boxes. Coupling rows in sidebar are clickable.</p>
         ${controlCheckbox("layers.components", "Components", layer.components)}
-        <h3>Box metrics</h3>
+        <h3>Line legend</h3>
+        ${edgeLegendHtml()}
+        <h3>Box content</h3>
         ${controlCheckbox("display.showTitle", "Component title", display.showTitle !== false)}
-        ${controlCheckbox("display.showFilesLines", "Files & lines", display.showFilesLines !== false)}
-        ${controlCheckbox("display.showDeps", "Dependency in/out", display.showDeps !== false)}
-        ${controlCheckbox("display.showStubs", "Stub count & density", display.showStubs !== false)}
+        ${controlCheckbox("display.showAgentOnSelect", "Agent / live slots when selected", display.showAgentOnSelect !== false)}
+        ${controlCheckbox("display.showFilesLines", "Files & lines (unselected)", display.showFilesLines === true)}
+        ${controlCheckbox("display.showDeps", "Dependency in/out (unselected)", display.showDeps === true)}
+        ${controlCheckbox("display.showStubs", "Stub count (unselected)", display.showStubs === true)}
         <h3>Color &amp; focus</h3>
         <div class="control-row">
           <label for="color-mode">Box color mode</label>
@@ -513,9 +763,10 @@
             ${FOCUS_COLORS.map((c) => `<option value="${c.value}" ${display.focusColor === c.value ? "selected" : ""}>${c.label}</option>`).join("")}
           </select>
         </div>
-        ${controlCheckbox("display.focusHighlight", "Highlight selected service + neighbors", display.focusHighlight !== false)}
-        ${controlCheckbox("display.highlightConnectedEdges", "Color connected edges", display.highlightConnectedEdges !== false)}
-        ${controlCheckbox("display.dimUnfocused", "Dim non-neighbors when a box is selected", display.dimUnfocused === true)}
+        ${controlCheckbox("display.focusHighlight", "Highlight paths when a box is selected", display.focusHighlight !== false)}
+        ${controlCheckbox("display.highlightConnectedEdges", "Accent color on connected lines", display.highlightConnectedEdges !== false)}
+        ${controlCheckbox("display.dimOnFocus", "Dim everything not on the highlighted path", display.dimOnFocus !== false)}
+        ${controlCheckbox("display.dimUnfocused", "Legacy dim (same as above if both on)", display.dimUnfocused === true)}
         ${controlCheckbox("display.componentGlow", "Glow on selected box", display.componentGlow !== false)}
         <h3>Display</h3>
         ${controlCheckbox("display.routeAroundBoxes", "Grid path (avoid box borders)", display.routeAroundBoxes !== false)}
@@ -577,9 +828,12 @@
     }
 
     function renderStats(summary, analysisRoot, componentCount, edgeCount) {
+      const imp = summary.import_summary || {};
       const items = [
         ["Components", componentCount],
         ["Coupling edges", edgeCount],
+        ["External imports", summary.external_edge_count ?? imp.external_import_count],
+        ["Unresolved", summary.unresolved_edge_count ?? imp.unresolved_import_count],
         ["Files", summary.file_count],
         ["Lines", summary.line_count],
         ["Stubs", summary.stub_count],
@@ -777,7 +1031,10 @@
       const exclude = new Set([source.id, target.id]);
       const blocked = buildBlockedCells(nodes, exclude, maxGx, maxGy);
       const { sx, sy, tx, ty } = edgeEndpoints(source, target);
-      const laneOffset = (laneIndex - (laneCount - 1) / 2) * EDGE_LANE_SPACING;
+      const useStrand = (edge.strandCount ?? 1) > 1;
+      const idx = useStrand ? edge.strandIndex : laneIndex;
+      const count = useStrand ? edge.strandCount : laneCount;
+      const laneOffset = (idx - (count - 1) / 2) * EDGE_LANE_SPACING;
       const portY = snap(sy + laneOffset);
       const srcRight = source.layout.x + source.layout.width;
       const tgtLeft = target.layout.x;
@@ -877,8 +1134,12 @@
     function edgeLabelText(edge) {
       const relation = edge.relation || "package_import";
       const weight = Number(edge.weight) || 1;
-      if (weight <= 1) return relation;
-      return `${relation} ×${weight}`;
+      if (relation === "external_import") {
+        const detail = (edge.detail || "").replace(/^ext:(stdlib|pkg):/, "");
+        return weight > 1 ? `${detail || "external"} ×${weight}` : (detail || "external");
+      }
+      if (weight <= 1) return relation === "package_import" ? "imports" : relation;
+      return `${relation === "package_import" ? "imports" : relation} ×${weight}`;
     }
 
     function planAllEdgeRoutes(edges, nodes, maxX, maxY) {
@@ -900,88 +1161,130 @@
         const target = nodes.find((n) => n.id === edge.target);
         if (!source || !target) continue;
         const { laneIndex, laneCount } = fanOrder.get(edge) || { laneIndex: 0, laneCount: 1 };
-        let points;
         const { sx, sy, tx, ty } = edgeEndpoints(source, target);
-        const useOrthogonal = viewerPrefs.display.routeAroundBoxes !== false
+        let points;
+        if (isExternalEdge(edge)) {
+          points = [[sx, sy], [tx, ty]];
+        } else if (isBackwardEdge(source, target)
           && viewerPrefs.display.edgeStyle === "orthogonal"
-          && !isBackwardEdge(source, target);
-        if (useOrthogonal) {
-          points = routeEdgeOnGrid(edge, source, target, laneIndex, laneCount, nodes, maxGx, maxGy, soft);
-          if (pathLength(points) < 24) {
+          && viewerPrefs.display.routeAroundBoxes !== false) {
+          points = orthogonalBackwardPath(
+            source,
+            target,
+            edge.strandIndex ?? laneIndex,
+            edge.strandCount ?? laneCount,
+          );
+        } else {
+          const useOrthogonal = viewerPrefs.display.routeAroundBoxes !== false
+            && viewerPrefs.display.edgeStyle === "orthogonal";
+          if (useOrthogonal) {
+            points = routeEdgeOnGrid(edge, source, target, laneIndex, laneCount, nodes, maxGx, maxGy, soft);
+            registerPathCorridor(points, soft);
+          } else {
             points = [[sx, sy], [tx, ty]];
           }
-          registerPathCorridor(points, soft);
-        } else {
-          points = [[sx, sy], [tx, ty]];
         }
-        routed.push({ edge, source, target, points });
+        routed.push({ edge, source, target, points, laneIndex, laneCount });
       }
       return routed;
     }
 
-    function edgesLayerSvg(edges, nodes, maxX, maxY, focus) {
+    function edgesLayerSvg(logicalEdges, nodes, maxX, maxY, focus) {
       if (!viewerPrefs.layers.edges) return "";
       const strokeW = edgeStrokeWidth();
-      const routed = planAllEdgeRoutes(edges, nodes, maxX, maxY);
+      const strands = expandEdgeStrands(logicalEdges);
+      const routed = planAllEdgeRoutes(strands, nodes, maxX, maxY);
       const accent = focus.accent || "#fbbf24";
-      const hops = detectCrossingHops(routed.map((r) => ({ edgeId: r.edge.source + "->" + r.edge.target, points: r.points })));
+      const internalForHops = routed.filter((r) => !isExternalEdge(r.edge));
+      const hops = internalForHops.length <= 90 && viewerPrefs.display.edgeHops !== false
+        ? detectCrossingHops(
+          internalForHops.map((r) => ({
+            edgeId: r.edge._visualId || `${r.edge.source}->${r.edge.target}`,
+            points: r.points,
+          })),
+        )
+        : [];
       const parts = [];
 
-      for (const { edge, source, target, points } of routed) {
-        const label = edgeLabelText(edge);
-        const title = Number(edge.weight) > 1
-          ? `${edge.weight} Python import paths aggregated between these sectors (one edge)`
-          : label;
+      for (const { edge, source, target, points, laneIndex, laneCount } of routed) {
+        const rel = edge.relation || "package_import";
+        const style = relationStyle(rel);
+        const aggregate = edge._aggregateWeight || edge.weight || 1;
+        const title = isExternalEdge(edge)
+          ? `${style.label}: ${aggregate} import(s) to hub`
+          : `${style.label}: ${aggregate} import path(s) — strand ${(edge.strandIndex ?? 0) + 1} of ${edge.strandCount ?? 1}`;
         const { sx, sy, tx, ty } = edgeEndpoints(source, target);
-        const useBezier = viewerPrefs.display.edgeStyle === "bezier"
-          || isBackwardEdge(source, target)
-          || pathLength(points) < 24;
-        const d = useBezier ? legacyBezierPath(sx, sy, tx, ty) : pathToD(points);
-        const edgeKey = `${edge.source}::${edge.target}`;
+        const ext = isExternalEdge(edge);
+        const backward = !ext && isBackwardEdge(source, target);
+        const orthMode = viewerPrefs.display.edgeStyle === "orthogonal"
+          && viewerPrefs.display.routeAroundBoxes !== false;
+        let d;
+        if (ext && target.id === EXTERNAL_HUB_ID) {
+          const spread = ((laneIndex ?? 0) - ((laneCount ?? 1) - 1) / 2) * 5;
+          d = legacyBezierPath(sx, sy, tx, snap(ty + spread));
+        } else if (backward && orthMode) {
+          d = pathToD(orthogonalBackwardPath(
+            source,
+            target,
+            edge.strandIndex ?? 0,
+            edge.strandCount ?? 1,
+          ));
+        } else if (viewerPrefs.display.edgeStyle === "bezier") {
+          d = legacyBezierPath(sx, sy, tx, ty);
+        } else {
+          d = pathToD(points);
+        }
+        const edgeKey = `${edge.source}::${edge.target}::${edge.strandIndex ?? 0}`;
         const isFocus = focus.active && focus.edgeKeys.has(edgeKey);
-        const dim = focus.active
-          && focus.edgeKeys.size > 0
-          && viewerPrefs.display.dimUnfocused !== false
-          && !isFocus;
-        const edgeClass = `edge${isFocus ? " focus" : ""}${dim ? " dim" : ""}`;
+        const shouldDim = focus.active && focus.edgeKeys.size > 0
+          && (viewerPrefs.display.dimOnFocus !== false || viewerPrefs.display.dimUnfocused === true);
+        const dim = shouldDim && !isFocus;
+        const edgeClass = `edge${ext ? " external" : ""}${isFocus ? " focus" : ""}${dim ? " dim" : ""}`;
         const stroke = isFocus && viewerPrefs.display.highlightConnectedEdges !== false
           ? accent
-          : "#94a3b8";
+          : style.stroke;
+        const dash = isFocus ? "" : (style.dash || "");
         const sw = isFocus ? Math.max(strokeW + 1, 3) : strokeW;
         const opacity = dim ? 0.45 : 0.95;
-        parts.push(`<path class="${edgeClass}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-opacity="${opacity}" d="${d}" />`);
+        parts.push(
+          `<path class="${edgeClass}" fill="none" stroke="${stroke}" stroke-width="${sw}"`
+          + ` stroke-opacity="${opacity}"${dash ? ` stroke-dasharray="${dash}"` : ""} d="${d}">`
+          + `<title>${escapeXml(title)}</title></path>`,
+        );
         if (viewerPrefs.debug.showPorts) {
           const p0 = points[0];
           const pN = points[points.length - 1];
           parts.push(`<circle class="port-dot" cx="${snap(p0[0])}" cy="${snap(p0[1])}" r="3" />`);
           parts.push(`<circle class="port-dot" cx="${snap(pN[0])}" cy="${snap(pN[1])}" r="3" />`);
         }
-        if (viewerPrefs.layers.edgeLabels && points.length >= 2) {
-          const midIdx = Math.floor((points.length - 1) / 2);
-          const lx = snap((points[midIdx][0] + points[midIdx + 1][0]) / 2);
-          const ly = snap((points[midIdx][1] + points[midIdx + 1][1]) / 2 - 12);
-          const pillW = Math.max(72, label.length * 6.2);
-          parts.push(`<rect class="edge-pill" x="${lx - pillW / 2}" y="${ly - 10}" width="${pillW}" height="18" rx="9" />`);
-          parts.push(`<title>${escapeXml(title)}</title>`);
-          parts.push(`<text class="edge-label" x="${lx}" y="${ly + 3}">${escapeXml(label)}</text>`);
-        }
       }
       parts.push(...hops);
-      const drawn = routed.length;
-      const badge = drawn
-        ? `<text x="12" y="18" fill="#94a3b8" font-size="11">${drawn} coupling edge${drawn === 1 ? "" : "s"} drawn</text>`
+      const lineCount = routed.length;
+      const couplingCount = logicalEdges.filter((e) => !isExternalEdge(e)).length;
+      const badge = lineCount
+        ? `<text x="12" y="18" fill="#94a3b8" font-size="11">${lineCount} line${lineCount === 1 ? "" : "s"} · ${couplingCount} coupling${couplingCount === 1 ? "" : "s"}</text>`
         : "";
       return `<g data-layer="edges">${badge}${parts.join("")}</g>`;
     }
 
     function componentSvg(node, focus) {
+      if (node.id === EXTERNAL_HUB_ID) {
+        const layout = node.layout || {};
+        return `<g data-layer="external-hub">
+          <rect x="${layout.x}" y="${layout.y}" width="${layout.width}" height="${layout.height}" rx="10"
+            fill="rgba(30,41,59,0.9)" stroke="rgba(100,116,139,0.5)" stroke-width="1" stroke-dasharray="4 3" />
+          <text x="${layout.x + layout.width / 2}" y="${layout.y + layout.height / 2 + 4}" fill="#94a3b8"
+            font-size="11" text-anchor="middle">External / stdlib</text>
+        </g>`;
+      }
       const layout = node.layout || {};
       const metrics = node.metrics || {};
       const fill = componentFill(node);
       const isSelected = selectedDrilldownId === node.drilldown_id;
       const isPeer = focus.active && focus.nodeIds.has(node.id) && !isSelected;
-      const dim = focus.active && viewerPrefs.display.dimUnfocused !== false
-        && !focus.nodeIds.has(node.id);
+      const shouldDim = focus.active && focus.nodeIds.size > 0
+        && (viewerPrefs.display.dimOnFocus !== false || viewerPrefs.display.dimUnfocused === true);
+      const dim = shouldDim && !focus.nodeIds.has(node.id);
       const accent = focus.accent || "#fbbf24";
       const classes = ["component"];
       if (isSelected) classes.push("selected");
@@ -991,23 +1294,36 @@
       const strokeW = isSelected ? 2.5 : (isPeer ? 2 : 1);
       const useGlow = viewerPrefs.display.componentGlow !== false && isSelected;
       const disp = viewerPrefs.display;
+      const drilldown = drilldownsFromPayload(apiPayload)[node.drilldown_id];
+      const slots = drilldown?.live_slots || {};
       const metaLines = [];
-      if (disp.showFilesLines !== false) {
-        metaLines.push(`${escapeHtml(node.role)} · ${fmt(metrics.files)} files`);
-        metaLines.push(`${fmt(metrics.lines)} lines`);
-      }
-      if (disp.showDeps !== false) {
-        metaLines.push(`in ${fmt(metrics.dependency_in)} / out ${fmt(metrics.dependency_out)}`);
-      }
-      if (disp.showStubs !== false) {
-        metaLines.push(`${fmt(metrics.stubs)} stubs · ${stubDensity(metrics.lines, metrics.stubs)}`);
+      if (isSelected && disp.showAgentOnSelect !== false) {
+        const agents = slots.agents || [];
+        metaLines.push(agents.length
+          ? `Agents: ${agents.length} pinned`
+          : "Agents: — (live overlay)");
+        metaLines.push(slots.braid_events?.length
+          ? `Braid: ${slots.braid_events.length} stream(s)`
+          : "Braid: —");
+        metaLines.push(slots.xterm_stream ? "Terminal: attached" : "Terminal: —");
+      } else {
+        if (disp.showFilesLines === true) {
+          metaLines.push(`${escapeHtml(node.role)} · ${fmt(metrics.files)} files`);
+          metaLines.push(`${fmt(metrics.lines)} lines`);
+        }
+        if (disp.showDeps === true) {
+          metaLines.push(`in ${fmt(metrics.dependency_in)} / out ${fmt(metrics.dependency_out)}`);
+        }
+        if (disp.showStubs === true) {
+          metaLines.push(`${fmt(metrics.stubs)} stubs · ${stubDensity(metrics.lines, metrics.stubs)}`);
+        }
       }
       const titleHtml = disp.showTitle !== false
         ? `<div class="box-title">${escapeHtml(node.label)}</div>`
         : "";
-      const fo = metaLines.length
+      const fo = (titleHtml || metaLines.length)
         ? `<foreignObject x="${layout.x + 10}" y="${layout.y + 8}" width="${layout.width - 20}" height="${layout.height - 16}">
-            <div xmlns="http://www.w3.org/1999/xhtml" class="component-fo">${titleHtml}${metaLines.map((line) => `<div class="box-meta">${line}</div>`).join("")}</div>
+            <div xmlns="http://www.w3.org/1999/xhtml" class="component-fo">${titleHtml}${metaLines.map((line) => `<div class="box-meta${isSelected ? " agent-slot" : ""}">${line}</div>`).join("")}</div>
           </foreignObject>`
         : "";
       return `<g class="${classes.join(" ")}" data-component="${escapeXml(node.drilldown_id)}" filter="${useGlow ? "url(#glow-focus)" : "none"}">
@@ -1023,19 +1339,33 @@
 
     function renderSystemMap() {
       const systemMap = systemMapFromPayload(apiPayload);
-      const nodes = systemMap.nodes || [];
+      let nodes = systemMap.nodes || [];
       const edges = systemMap.edges || [];
       const lanes = systemMap.lanes || [];
       if (!nodes.length) {
         mapCanvas.innerHTML = `<text x="40" y="60" fill="#94a3b8">No components in system map. Re-run map after topology export.</text>`;
         return;
       }
-      const edgeNotice = !edges.length
-        ? `<text x="40" y="28" fill="#fbbf24" font-size="14" font-weight="600">No coupling edges in run ${escapeXml(runId || "unknown")}. Stats show Coupling edges: 0 — pick another run (e.g. 20260522T160033Z-a6686131 has 47).</text>`
-        : "";
+      const hasInternal = edges.some((e) => (e.relation || "package_import") === "package_import");
+      const summary = apiPayload.summary || apiPayload.topology?.summary || {};
+      const imp = summary.import_summary || {};
+      const unresolvedN = summary.unresolved_edge_count ?? imp.unresolved_import_count ?? 0;
+      let edgeNotice = "";
+      if (!hasInternal && viewerPrefs.layers.depInternal !== false) {
+        edgeNotice = `<text x="40" y="28" fill="#fbbf24" font-size="14" font-weight="600">No internal coupling in run ${escapeXml(runId || "unknown")}. Re-scan or pick run 20260522T160033Z-a6686131 (47 edges).</text>`;
+      }
+      if (unresolvedN > 0) {
+        edgeNotice += `<text x="40" y="${hasInternal ? 28 : 48}" fill="#f97316" font-size="12">${fmt(unresolvedN)} unresolved import(s) — see file drill-down (not drawn as map lines).</text>`;
+      }
 
       const maxY = Math.max(760, ...nodes.map((n) => (n.layout?.y || 0) + (n.layout?.height || 120) + 100));
-      const maxX = Math.max(1280, ...nodes.map((n) => (n.layout?.x || 0) + (n.layout?.width || 220) + 80));
+      let maxX = Math.max(1280, ...nodes.map((n) => (n.layout?.x || 0) + (n.layout?.width || 220) + 80));
+      if (viewerPrefs.layers.depExternal === true && edges.some((e) => e.target === EXTERNAL_HUB_ID)) {
+        if (!nodes.some((n) => n.id === EXTERNAL_HUB_ID)) {
+          nodes = [...nodes, externalHubNode(maxX)];
+        }
+        maxX += 220;
+      }
       mapCanvas.setAttribute("viewBox", `0 0 ${maxX} ${maxY}`);
 
       const focus = buildFocusContext(nodes, edges);
@@ -1061,15 +1391,55 @@
         el.addEventListener("click", (event) => {
           event.stopPropagation();
           selectedDrilldownId = el.getAttribute("data-component");
+          selectedCouplingRef = null;
           renderSystemMap();
           renderSidebar();
         });
       });
       mapCanvas.addEventListener("click", () => {
-        if (!selectedDrilldownId) return;
+        if (!selectedDrilldownId && !selectedCouplingRef) return;
         selectedDrilldownId = null;
+        selectedCouplingRef = null;
         renderSystemMap();
         renderSidebar();
+      });
+    }
+
+    function couplingSidebarRow(edge, direction, nodes) {
+      const rel = edge.relation || "package_import";
+      const style = relationStyle(rel);
+      const w = Number(edge._aggregateWeight || edge.weight) || 1;
+      const capped = w > MAX_STRANDS_PER_COUPLING;
+      const peerId = direction === "out" ? edge.target : edge.source;
+      const peer = componentLabel(peerId, nodes);
+      const strandNote = capped
+        ? `${MAX_STRANDS_PER_COUPLING} lines shown · ${w} paths total`
+        : (w > 1 ? `${w} parallel lines on map` : "1 line on map");
+      const ref = `${edge.source}::${edge.target}`;
+      const active = selectedCouplingRef
+        && selectedCouplingRef.source === edge.source
+        && selectedCouplingRef.target === edge.target;
+      return `<div class="coupling-row${active ? " active" : ""}" data-coupling-ref="${escapeXml(ref)}" role="button" tabindex="0">
+        <strong><span class="color-swatch" style="background:${style.stroke}"></span>${escapeHtml(style.label)} ${direction === "out" ? "→" : "←"} ${escapeHtml(peer)}</strong>
+        <span>${escapeHtml(strandNote)} · click to highlight path on map</span>
+        <span class="subtitle">${escapeHtml(style.description)}</span>
+      </div>`;
+    }
+
+    function bindSidebarCouplingClicks() {
+      sidebar.querySelectorAll("[data-coupling-ref]").forEach((el) => {
+        el.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const parts = (el.getAttribute("data-coupling-ref") || "").split("::");
+          if (parts.length < 2) return;
+          const ref = { source: parts[0], target: parts[1] };
+          const same = selectedCouplingRef
+            && selectedCouplingRef.source === ref.source
+            && selectedCouplingRef.target === ref.target;
+          selectedCouplingRef = same ? null : ref;
+          renderSystemMap();
+          renderSidebar();
+        });
       });
     }
 
@@ -1079,36 +1449,71 @@
       if (!selected) {
         sidebar.innerHTML = `
           <h2>Select a component</h2>
-          <p class="subtitle">Click a box on the map for files, metrics, and coupling.</p>
+          <p class="subtitle">Click a box: coupling list and imports live here; selected boxes show agent slots on the map.</p>
         `;
         return;
       }
       const files = selected.files || [];
       const summary = selected.summary || {};
+      const componentId = selected.component_id || selectedDrilldownId?.replace("component:", "");
+      const systemMap = systemMapFromPayload(apiPayload);
+      const nodes = systemMap.nodes || [];
+      const allEdges = systemMap.edges || [];
+      const outgoing = allEdges.filter((e) => e.source === componentId);
+      const incoming = allEdges.filter((e) => e.target === componentId);
+      const importRollup = { local: 0, external: 0, stdlib: 0, unresolved: 0 };
+      for (const file of files) {
+        for (const imp of file.imports || []) {
+          const st = imp.status || "external";
+          if (importRollup[st] !== undefined) importRollup[st] += 1;
+        }
+      }
+      const slots = selected.live_slots || {};
       sidebar.innerHTML = `
         <h2>${escapeXml(selected.label || selected.component_id)}</h2>
         <div class="pill-row">
           <span>${escapeXml(selected.role || "component")}</span>
-          <span>${fmt(summary.lines)} lines</span>
-          <span>${fmt(summary.files)} files</span>
-          <span>${fmt(summary.stubs)} stubs</span>
-          <span>${stubDensity(summary.lines, summary.stubs)}</span>
-          <span>${fmt(summary.dependency_in)} deps in</span>
-          <span>${fmt(summary.dependency_out)} deps out</span>
+          <span>${fmt(summary.files)} files · ${fmt(summary.lines)} lines</span>
+          ${importRollup.unresolved ? `<span>${fmt(importRollup.unresolved)} unresolved</span>` : ""}
         </div>
         <section>
-          <h3>Top files</h3>
-          <div class="file-list">${files.slice(0, 20).map((file) => `
-            <div class="file-row">
-              <strong>${escapeXml(file.path || "")}</strong>
-              <span>${fmt(file.lines)} lines · ${fmt(file.stub_count)} stubs · ${fmt(file.dependency_touch_count)} coupling touches</span>
-            </div>`).join("") || "<span class=\"subtitle\">No files listed.</span>"}
+          <h3>AI agent (live)</h3>
+          <div class="stream-box">${(slots.agents || []).length
+            ? (slots.agents || []).map((a) => escapeHtml(typeof a === "string" ? a : a.id || "agent")).join(", ")
+            : "No agents pinned — reserved for AISpy / Braid overlay."}</div>
+          <p class="subtitle">Braid · xterm · priority events attach when live layer is on.</p>
         </section>
         <section>
-          <h3>Live slots</h3>
-          <p class="subtitle">Agent pins and braid streams attach here after live layer ships.</p>
+          <h3>Coupling</h3>
+          <p class="hint">Violet = cross-component imports. Count = how many lines we draw between boxes.</p>
+          <h4>Outgoing</h4>
+          ${outgoing.length
+            ? outgoing.map((e) => couplingSidebarRow(e, "out", nodes)).join("")
+            : "<span class=\"subtitle\">No outgoing coupling.</span>"}
+          <h4>Incoming</h4>
+          ${incoming.length
+            ? incoming.map((e) => couplingSidebarRow(e, "in", nodes)).join("")
+            : "<span class=\"subtitle\">No incoming coupling.</span>"}
+        </section>
+        <section>
+          <h3>Imports by file</h3>
+          <div class="file-list">${files.slice(0, 20).map((file) => {
+            const imps = file.imports || [];
+            const unresolved = imps.filter((i) => i.status === "unresolved");
+            const external = imps.filter((i) => i.status === "external");
+            const impHint = unresolved.length
+              ? ` · <em style="color:#f97316">${unresolved.length} unresolved</em>`
+              : (external.length ? ` · ${external.length} external` : "");
+            return `
+            <div class="file-row">
+              <strong>${escapeXml(file.path || "")}</strong>
+              <span>${fmt(file.lines)} lines · ${fmt(file.stubs)} stubs · ${fmt(file.dependency_touch_count)} touches${impHint}</span>
+              ${unresolved.length ? `<span class="subtitle">${unresolved.slice(0, 3).map((i) => escapeHtml((i.names || []).join(", ") || i.module || "?")).join("; ")}</span>` : ""}
+            </div>`;
+          }).join("") || "<span class=\"subtitle\">No files listed. Re-run map with topology 1.2+ for per-file imports.</span>"}
         </section>
       `;
+      bindSidebarCouplingClicks();
     }
 
     function renderSectorGrid() {

@@ -1,4 +1,4 @@
-2026.05.22-v3.2
-viewer-build: deps-visible + backward-bezier + dim-default-off
-schema: sector-topology-v2
-prior-tag: shufti-map-2026.05.22-v3
+2026.05.22-v3.6-focus
+viewer-build: strand-coupling + relation-layer-toggles + focus-dim + sidebar-coupling-click
+topology-schema: 1.2.0 (inheritance layer ready; mapper emission pending)
+prior-tag: shufti-map-2026.05.22-v3.2
