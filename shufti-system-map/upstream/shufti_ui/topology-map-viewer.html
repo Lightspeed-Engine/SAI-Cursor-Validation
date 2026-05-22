@@ -14,7 +14,8 @@
       --muted: #94a3b8;
       --accent: #a78bfa;
       --edge-pill: #4c1d95;
-      --grid-line: rgba(148, 163, 184, 0.08);
+      --grid-line: rgba(148, 163, 184, 0.14);
+      --grid-line-major: rgba(167, 139, 250, 0.22);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -76,12 +77,36 @@
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }
-    .grid-line { stroke: var(--grid-line); stroke-width: 1; }
+    .grid-line { stroke: var(--grid-line); stroke-width: 1; pointer-events: none; }
+    .grid-line-major { stroke: var(--grid-line-major); stroke-width: 1.25; pointer-events: none; }
+    .component-fo {
+      color: #f8fafc;
+      font-family: Inter, "IBM Plex Sans", "Segoe UI", sans-serif;
+      line-height: 1.3;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .component-fo .box-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+    .component-fo .box-meta { font-size: 10px; color: #cbd5e1; margin-top: 2px; }
     .edge {
       fill: none;
       stroke: rgba(148, 163, 184, 0.55);
       stroke-linecap: square;
       stroke-linejoin: round;
+    }
+    .edge-hop {
+      fill: none;
+      stroke: rgba(148, 163, 184, 0.65);
+      stroke-width: 1.5;
     }
     .edge-label { fill: #f8fafc; font-size: 10px; text-anchor: middle; }
     .edge-pill {
@@ -91,8 +116,16 @@
     }
     .port-dot { fill: #fbbf24; opacity: 0.85; }
     .component { cursor: pointer; }
-    .component rect { stroke: rgba(148, 163, 184, 0.35); stroke-width: 1; }
-    .component.selected rect { stroke: #fbbf24; stroke-width: 2; }
+    .component rect { stroke: rgba(148, 163, 184, 0.35); stroke-width: 1; transition: opacity 0.15s; }
+    .component.selected rect { stroke-width: 2.5; }
+    .component.focus-peer rect { stroke-width: 2; }
+    .component.dim { opacity: 0.28; }
+    .edge.dim { opacity: 0.14; }
+    .edge.focus { opacity: 1; }
+    .color-swatch {
+      display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+      margin-right: 6px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.2);
+    }
     .component.no-glow { filter: none; }
     .component-title { fill: #f8fafc; font-size: 13px; font-weight: 700; }
     .component-meta { fill: #cbd5e1; font-size: 11px; }
@@ -184,7 +217,26 @@
 
   <script type="module">
     const GRID_CELL = 16;
-    const PREFS_KEY = "shufti-map-viewer-prefs-v1";
+    const ROUTING_PAD = 8;
+    const EDGE_LANE_SPACING = 14;
+    const GUTTER_OUT = 22;
+    const GUTTER_IN = 22;
+    const VIEWER_BUILD = "2026.05.22-v3";
+    const PREFS_KEY = "shufti-map-viewer-prefs-v2";
+    const ROLE_COLORS = {
+      gateway: "#7c3aed",
+      service: "#2563eb",
+      core: "#0891b2",
+      data: "#059669",
+      integration: "#ca8a04",
+      support: "#64748b",
+    };
+    const FOCUS_COLORS = [
+      { id: "amber", label: "Amber", value: "#fbbf24" },
+      { id: "violet", label: "Violet", value: "#a78bfa" },
+      { id: "cyan", label: "Cyan", value: "#22d3ee" },
+      { id: "green", label: "Green", value: "#4ade80" },
+    ];
     const DEFAULT_PREFS = {
       layers: {
         grid: false,
@@ -195,11 +247,21 @@
       },
       display: {
         heatFill: true,
-        showStubsOnBox: true,
+        showTitle: true,
+        showFilesLines: true,
+        showDeps: true,
+        showStubs: true,
         edgeStyle: "orthogonal",
         edgeWidth: "md",
+        colorMode: "heat",
+        focusHighlight: true,
+        highlightConnectedEdges: true,
+        dimUnfocused: true,
+        focusColor: "#fbbf24",
         componentGlow: true,
         edgesOnTop: false,
+        routeAroundBoxes: true,
+        edgeHops: true,
       },
       debug: {
         showPorts: false,
@@ -232,7 +294,11 @@
       try {
         const raw = localStorage.getItem(PREFS_KEY);
         if (!raw) return structuredClone(DEFAULT_PREFS);
-        return deepMerge(structuredClone(DEFAULT_PREFS), JSON.parse(raw));
+        const parsed = JSON.parse(raw);
+        if (parsed.display?.showStubsOnBox !== undefined && parsed.display.showStubs === undefined) {
+          parsed.display.showStubs = parsed.display.showStubsOnBox;
+        }
+        return deepMerge(structuredClone(DEFAULT_PREFS), parsed);
       } catch {
         return structuredClone(DEFAULT_PREFS);
       }
@@ -286,6 +352,10 @@
       })[ch]);
     }
 
+    function escapeHtml(value) {
+      return escapeXml(value);
+    }
+
     function fmt(n) {
       return Number(n || 0).toLocaleString();
     }
@@ -298,11 +368,56 @@
     }
 
     function heatColor(value) {
-      if (!viewerPrefs.display.heatFill) return "#1e293b";
       if (value >= 0.75) return "#ea580c";
       if (value >= 0.45) return "#2563eb";
       if (value >= 0.18) return "#1d4ed8";
       return "#1e293b";
+    }
+
+    function componentFill(node) {
+      const mode = viewerPrefs.display.colorMode || "heat";
+      const metrics = node.metrics || {};
+      if (mode === "role") return ROLE_COLORS[node.role] || "#334155";
+      if (mode === "neutral") return "#1e293b";
+      if (viewerPrefs.display.heatFill === false) return "#1e293b";
+      return heatColor(metrics.static_heat || 0);
+    }
+
+    function nodeByDrilldown(nodes, drilldownId) {
+      return nodes.find((n) => n.drilldown_id === drilldownId);
+    }
+
+    function buildFocusContext(nodes, edges) {
+      const display = viewerPrefs.display;
+      if (!selectedDrilldownId || display.focusHighlight === false) {
+        return { active: false, nodeIds: new Set(), edgeKeys: new Set(), accent: display.focusColor || "#fbbf24" };
+      }
+      const selected = nodeByDrilldown(nodes, selectedDrilldownId);
+      if (!selected) {
+        return { active: false, nodeIds: new Set(), edgeKeys: new Set(), accent: display.focusColor || "#fbbf24" };
+      }
+      const nodeIds = new Set([selected.id]);
+      const edgeKeys = new Set();
+      for (const edge of edges) {
+        if (edge.source === selected.id || edge.target === selected.id) {
+          edgeKeys.add(`${edge.source}::${edge.target}`);
+          nodeIds.add(edge.source);
+          nodeIds.add(edge.target);
+        }
+      }
+      return {
+        active: true,
+        selectedId: selected.id,
+        nodeIds,
+        edgeKeys,
+        accent: display.focusColor || "#fbbf24",
+      };
+    }
+
+    function roleLegendHtml() {
+      return Object.entries(ROLE_COLORS).map(([role, color]) => (
+        `<div class="control-row"><span><span class="color-swatch" style="background:${color}"></span>${role}</span></div>`
+      )).join("");
     }
 
     function systemMapFromPayload(payload) {
@@ -323,15 +438,40 @@
         <h2>Map controls</h2>
         <p class="hint">Debug toggles persist in this browser. Release UI will expose a smaller subset.</p>
         <h3>Layers</h3>
-        ${controlCheckbox("layers.grid", "Alignment grid", layer.grid)}
-        ${controlCheckbox("layers.lanes", "Lane labels", layer.lanes)}
+        ${controlCheckbox("layers.grid", "Alignment grid (16px)", layer.grid)}
+        ${controlCheckbox("layers.lanes", "Role lane headers (Gateway, Service, …)", layer.lanes)}
         ${controlCheckbox("layers.edges", "Dependency edges", layer.edges)}
         ${controlCheckbox("layers.edgeLabels", "Edge labels", layer.edgeLabels)}
         ${controlCheckbox("layers.components", "Components", layer.components)}
+        <h3>Box metrics</h3>
+        ${controlCheckbox("display.showTitle", "Component title", display.showTitle !== false)}
+        ${controlCheckbox("display.showFilesLines", "Files & lines", display.showFilesLines !== false)}
+        ${controlCheckbox("display.showDeps", "Dependency in/out", display.showDeps !== false)}
+        ${controlCheckbox("display.showStubs", "Stub count & density", display.showStubs !== false)}
+        <h3>Color &amp; focus</h3>
+        <div class="control-row">
+          <label for="color-mode">Box color mode</label>
+          <select id="color-mode" data-pref="display.colorMode">
+            <option value="heat" ${display.colorMode === "heat" || !display.colorMode ? "selected" : ""}>Heat (size/stubs)</option>
+            <option value="role" ${display.colorMode === "role" ? "selected" : ""}>Role lane</option>
+            <option value="neutral" ${display.colorMode === "neutral" ? "selected" : ""}>Neutral</option>
+          </select>
+        </div>
+        ${display.colorMode === "role" ? `<div class="hint">${roleLegendHtml()}</div>` : ""}
+        ${controlCheckbox("display.heatFill", "Apply heat scale (heat mode only)", display.heatFill !== false)}
+        <div class="control-row">
+          <label for="focus-color">Focus / edge highlight</label>
+          <select id="focus-color" data-pref="display.focusColor">
+            ${FOCUS_COLORS.map((c) => `<option value="${c.value}" ${display.focusColor === c.value ? "selected" : ""}>${c.label}</option>`).join("")}
+          </select>
+        </div>
+        ${controlCheckbox("display.focusHighlight", "Highlight selected service + neighbors", display.focusHighlight !== false)}
+        ${controlCheckbox("display.highlightConnectedEdges", "Color connected edges", display.highlightConnectedEdges !== false)}
+        ${controlCheckbox("display.dimUnfocused", "Dim everything else", display.dimUnfocused !== false)}
+        ${controlCheckbox("display.componentGlow", "Glow on selected box", display.componentGlow !== false)}
         <h3>Display</h3>
-        ${controlCheckbox("display.heatFill", "Heat fill on boxes", display.heatFill)}
-        ${controlCheckbox("display.showStubsOnBox", "Stub count on boxes", display.showStubsOnBox)}
-        ${controlCheckbox("display.componentGlow", "Selection glow", display.componentGlow)}
+        ${controlCheckbox("display.routeAroundBoxes", "Grid path (avoid box borders)", display.routeAroundBoxes !== false)}
+        ${controlCheckbox("display.edgeHops", "Hop arcs when edges cross", display.edgeHops !== false)}
         ${controlCheckbox("display.edgesOnTop", "Draw edges above boxes", display.edgesOnTop)}
         <div class="control-row">
           <label for="edge-style">Edge routing</label>
@@ -352,18 +492,22 @@
         ${controlCheckbox("debug.showPorts", "Show edge anchor ports", debug.showPorts)}
       `;
 
+      const onPrefChange = (rerenderControls = false) => {
+        savePrefs();
+        if (rerenderControls) renderControlsPanel();
+        renderSystemMap();
+        renderSidebar();
+      };
       controlsPanel.querySelectorAll('input[type="checkbox"][data-pref]').forEach((input) => {
         input.addEventListener("change", () => {
           setPrefPath(input.dataset.pref, input.checked);
-          savePrefs();
-          renderSystemMap();
+          onPrefChange();
         });
       });
       controlsPanel.querySelectorAll("select[data-pref]").forEach((select) => {
         select.addEventListener("change", () => {
           setPrefPath(select.dataset.pref, select.value);
-          savePrefs();
-          renderSystemMap();
+          onPrefChange(select.dataset.pref === "display.colorMode");
         });
       });
     }
@@ -395,19 +539,23 @@
       statsRow.innerHTML = items.map(([label, value]) => (
         `<div class="stat"><span>${label}</span><strong>${fmt(value)}</strong></div>`
       )).join("");
-      subtitle.textContent = `${analysisRoot || "unknown"} · fingerprint ${summary.topology_fingerprint || "n/a"}`;
+      subtitle.textContent = `${analysisRoot || "unknown"} · viewer ${VIEWER_BUILD} · fingerprint ${summary.topology_fingerprint || "n/a"}`;
     }
 
     function gridLayerSvg(maxX, maxY) {
       if (!viewerPrefs.layers.grid) return "";
       const lines = [];
       for (let x = 0; x <= maxX; x += GRID_CELL) {
-        lines.push(`<line class="grid-line" x1="${x}" y1="0" x2="${x}" y2="${maxY}" />`);
+        const major = x % (GRID_CELL * 5) === 0;
+        const cls = major ? "grid-line-major" : "grid-line";
+        lines.push(`<line class="${cls}" x1="${x}" y1="0" x2="${x}" y2="${maxY}" />`);
       }
       for (let y = 0; y <= maxY; y += GRID_CELL) {
-        lines.push(`<line class="grid-line" x1="0" y1="${y}" x2="${maxX}" y2="${y}" />`);
+        const major = y % (GRID_CELL * 5) === 0;
+        const cls = major ? "grid-line-major" : "grid-line";
+        lines.push(`<line class="${cls}" x1="0" y1="${y}" x2="${maxX}" y2="${y}" />`);
       }
-      return `<g data-layer="grid">${lines.join("")}</g>`;
+      return `<g data-layer="grid" style="opacity:1">${lines.join("")}</g>`;
     }
 
     function lanesLayerSvg(lanes) {
@@ -418,32 +566,118 @@
       }).join("")}</g>`;
     }
 
-    function buildEdgeBumpIndex(edges) {
-      const groups = new Map();
-      for (const edge of edges) {
-        const key = `${edge.source}::${edge.target}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(edge);
-      }
-      const bump = new Map();
-      for (const group of groups.values()) {
-        group.forEach((edge, index) => {
-          bump.set(edge, (index - (group.length - 1) / 2) * 10);
-        });
-      }
-      return bump;
+    function cellKey(gx, gy) {
+      return `${gx},${gy}`;
     }
 
-    function edgePath(sx, sy, tx, ty, bump) {
-      if (viewerPrefs.display.edgeStyle === "bezier") {
-        const mid = sx + Math.max(60, (tx - sx) / 2) + bump;
-        return `M ${snap(sx)} ${snap(sy)} C ${snap(mid)} ${snap(sy)}, ${snap(mid)} ${snap(ty)}, ${snap(tx)} ${snap(ty)}`;
+    function worldToCell(x, y) {
+      return { gx: Math.round(x / GRID_CELL), gy: Math.round(y / GRID_CELL) };
+    }
+
+    function cellToWorld(gx, gy) {
+      return { x: gx * GRID_CELL, y: gy * GRID_CELL };
+    }
+
+    function buildBlockedCells(nodes, excludeIds, maxGx, maxGy) {
+      const blocked = new Set();
+      for (const n of nodes) {
+        if (excludeIds.has(n.id)) continue;
+        const l = n.layout;
+        const x1 = Math.floor((l.x - ROUTING_PAD) / GRID_CELL);
+        const y1 = Math.floor((l.y - ROUTING_PAD) / GRID_CELL);
+        const x2 = Math.ceil((l.x + l.width + ROUTING_PAD) / GRID_CELL);
+        const y2 = Math.ceil((l.y + l.height + ROUTING_PAD) / GRID_CELL);
+        for (let gx = x1; gx <= x2; gx += 1) {
+          for (let gy = y1; gy <= y2; gy += 1) {
+            if (gx >= 0 && gy >= 0 && gx <= maxGx && gy <= maxGy) {
+              blocked.add(cellKey(gx, gy));
+            }
+          }
+        }
       }
-      const gutter = snap(sx + Math.max(48, (tx - sx) / 2) + bump);
-      if (Math.abs(ty - sy) < 8 && tx > sx) {
-        return `M ${snap(sx)} ${snap(sy)} L ${snap(tx)} ${snap(ty)}`;
+      return blocked;
+    }
+
+    function heuristic(gx, gy, tx, ty) {
+      return (Math.abs(gx - tx) + Math.abs(gy - ty)) * GRID_CELL;
+    }
+
+    function astarRoute(x0, y0, x1, y1, blocked, soft, maxGx, maxGy) {
+      const start = worldToCell(x0, y0);
+      const end = worldToCell(x1, y1);
+      const open = new Map();
+      const cameFrom = new Map();
+      const gScore = new Map();
+      const startK = cellKey(start.gx, start.gy);
+      const endK = cellKey(end.gx, end.gy);
+      gScore.set(startK, 0);
+      open.set(startK, heuristic(start.gx, start.gy, end.gx, end.gy));
+
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+      while (open.size > 0) {
+        let current = null;
+        let best = Infinity;
+        for (const [k, f] of open.entries()) {
+          if (f < best) {
+            best = f;
+            current = k;
+          }
+        }
+        if (!current) break;
+        open.delete(current);
+        if (current === endK) {
+          const path = [];
+          let cur = current;
+          while (cur) {
+            const [gx, gy] = cur.split(",").map(Number);
+            path.unshift([gx * GRID_CELL, gy * GRID_CELL]);
+            cur = cameFrom.get(cur);
+          }
+          path[0] = [x0, y0];
+          path[path.length - 1] = [x1, y1];
+          return simplifyOrthogonal(path);
+        }
+        const [cgx, cgy] = current.split(",").map(Number);
+        const baseG = gScore.get(current) ?? Infinity;
+        for (const [dx, dy] of dirs) {
+          const ngx = cgx + dx;
+          const ngy = cgy + dy;
+          if (ngx < 0 || ngy < 0 || ngx > maxGx || ngy > maxGy) continue;
+          const nk = cellKey(ngx, ngy);
+          if (blocked.has(nk)) continue;
+          const step = soft.has(nk) ? 4 : 1;
+          const tg = baseG + step;
+          if (tg < (gScore.get(nk) ?? Infinity)) {
+            cameFrom.set(nk, current);
+            gScore.set(nk, tg);
+            open.set(nk, tg + heuristic(ngx, ngy, end.gx, end.gy));
+          }
+        }
       }
-      return `M ${snap(sx)} ${snap(sy)} L ${gutter} ${snap(sy)} L ${gutter} ${snap(ty)} L ${snap(tx)} ${snap(ty)}`;
+      return simplifyOrthogonal([[x0, y0], [x0, y1], [x1, y1]]);
+    }
+
+    function simplifyOrthogonal(points) {
+      if (points.length < 2) return points;
+      const out = [points[0]];
+      for (let i = 1; i < points.length; i += 1) {
+        const prev = out[out.length - 1];
+        const cur = points[i];
+        if (prev[0] === cur[0] && prev[1] === cur[1]) continue;
+        if (out.length >= 2) {
+          const prev2 = out[out.length - 2];
+          const collinear = (prev2[0] === prev[0] && prev[0] === cur[0])
+            || (prev2[1] === prev[1] && prev[1] === cur[1]);
+          if (collinear) out.pop();
+        }
+        out.push(cur);
+      }
+      return out;
+    }
+
+    function pathToD(points) {
+      return points.map((p, i) => `${i === 0 ? "M" : "L"} ${snap(p[0])} ${snap(p[1])}`).join(" ");
     }
 
     function edgeEndpoints(source, target) {
@@ -454,54 +688,277 @@
       return { sx, sy, tx, ty };
     }
 
-    function edgesLayerSvg(edges, nodes, bumpIndex) {
-      if (!viewerPrefs.layers.edges) return "";
-      const strokeW = edgeStrokeWidth();
-      const parts = [];
+    function sortEdgesForFanOut(edges, nodes) {
+      const bySource = new Map();
       for (const edge of edges) {
+        if (!bySource.has(edge.source)) bySource.set(edge.source, []);
+        bySource.get(edge.source).push(edge);
+      }
+      const order = new Map();
+      for (const list of bySource.values()) {
+        list.sort((a, b) => {
+          const ta = nodes.find((n) => n.id === a.target);
+          const tb = nodes.find((n) => n.id === b.target);
+          const dy = (ta?.layout?.y ?? 0) - (tb?.layout?.y ?? 0);
+          if (dy !== 0) return dy;
+          return (ta?.layout?.x ?? 0) - (tb?.layout?.x ?? 0);
+        });
+        list.forEach((edge, index) => {
+          order.set(edge, { laneIndex: index, laneCount: list.length });
+        });
+      }
+      return order;
+    }
+
+    function registerPathCorridor(points, soft) {
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const [x1, y1] = points[i];
+        const [x2, y2] = points[i + 1];
+        const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)) / GRID_CELL + 1;
+        for (let s = 0; s <= steps; s += 1) {
+          const t = steps === 0 ? 0 : s / steps;
+          const wx = x1 + (x2 - x1) * t;
+          const wy = y1 + (y2 - y1) * t;
+          const { gx, gy } = worldToCell(wx, wy);
+          soft.add(cellKey(gx, gy));
+        }
+      }
+    }
+
+    function routeEdgeOnGrid(edge, source, target, laneIndex, laneCount, nodes, maxGx, maxGy, soft) {
+      const exclude = new Set([source.id, target.id]);
+      const blocked = buildBlockedCells(nodes, exclude, maxGx, maxGy);
+      const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+      const laneOffset = (laneIndex - (laneCount - 1) / 2) * EDGE_LANE_SPACING;
+      const portY = snap(sy + laneOffset);
+      const srcRight = source.layout.x + source.layout.width;
+      const tgtLeft = target.layout.x;
+      const busX = snap(srcRight + GUTTER_OUT);
+      const approachX = snap(tgtLeft - GUTTER_IN);
+
+      const points = [[sx, sy]];
+      if (laneCount > 1 && Math.abs(portY - sy) > 2) {
+        points.push([sx, portY]);
+      }
+      points.push([busX, portY]);
+
+      const mid = astarRoute(busX, portY, approachX, ty, blocked, soft, maxGx, maxGy);
+      for (let i = 1; i < mid.length; i += 1) points.push(mid[i]);
+
+      if (points[points.length - 1][0] !== tx || points[points.length - 1][1] !== ty) {
+        points.push([tx, ty]);
+      }
+      return simplifyOrthogonal(points);
+    }
+
+    function legacyBezierPath(sx, sy, tx, ty) {
+      const mid = sx + Math.max(60, (tx - sx) / 2);
+      return `M ${snap(sx)} ${snap(sy)} C ${snap(mid)} ${snap(sy)}, ${snap(mid)} ${snap(ty)}, ${snap(tx)} ${snap(ty)}`;
+    }
+
+    function segmentOrientation(x1, y1, x2, y2) {
+      if (Math.abs(y2 - y1) < 1) return "h";
+      if (Math.abs(x2 - x1) < 1) return "v";
+      return "d";
+    }
+
+    function segmentsFromPath(edgeId, points) {
+      const segs = [];
+      for (let i = 0; i < points.length - 1; i += 1) {
+        segs.push({
+          edgeId,
+          i,
+          x1: points[i][0],
+          y1: points[i][1],
+          x2: points[i + 1][0],
+          y2: points[i + 1][1],
+          orient: segmentOrientation(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]),
+        });
+      }
+      return segs;
+    }
+
+    function segmentIntersectPoint(a, b) {
+      if (a.orient === "h" && b.orient === "v") {
+        const y = a.y1;
+        const x = b.x1;
+        if (x >= Math.min(a.x1, a.x2) - 1 && x <= Math.max(a.x1, a.x2) + 1
+          && y >= Math.min(b.y1, b.y2) - 1 && y <= Math.max(b.y1, b.y2) + 1) {
+          return { x, y, hop: "over-h" };
+        }
+      }
+      if (a.orient === "v" && b.orient === "h") {
+        const x = a.x1;
+        const y = b.y1;
+        if (x >= Math.min(b.x1, b.x2) - 1 && x <= Math.max(b.x1, b.x2) + 1
+          && y >= Math.min(a.y1, a.y2) - 1 && y <= Math.max(a.y1, a.y2) + 1) {
+          return { x, y, hop: "over-v" };
+        }
+      }
+      return null;
+    }
+
+    function hopArcSvg(x, y, hop) {
+      const r = 7;
+      if (hop === "over-h") {
+        return `<path class="edge-hop" d="M ${snap(x - r)} ${snap(y)} Q ${snap(x)} ${snap(y - r)} ${snap(x + r)} ${snap(y)}" />`;
+      }
+      return `<path class="edge-hop" d="M ${snap(x)} ${snap(y - r)} Q ${snap(x + r)} ${snap(y)} ${snap(x)} ${snap(y + r)}" />`;
+    }
+
+    function detectCrossingHops(routedPaths) {
+      const hops = [];
+      const allSegs = [];
+      for (const { edgeId, points } of routedPaths) {
+        allSegs.push(...segmentsFromPath(edgeId, points));
+      }
+      for (let i = 0; i < allSegs.length; i += 1) {
+        for (let j = i + 1; j < allSegs.length; j += 1) {
+          const a = allSegs[i];
+          const b = allSegs[j];
+          if (a.edgeId === b.edgeId) continue;
+          const hit = segmentIntersectPoint(a, b) || segmentIntersectPoint(b, a);
+          if (hit && viewerPrefs.display.edgeHops !== false) {
+            hops.push(hopArcSvg(hit.x, hit.y, hit.hop));
+          }
+        }
+      }
+      return hops;
+    }
+
+    function edgeLabelText(edge) {
+      const relation = edge.relation || "package_import";
+      const weight = Number(edge.weight) || 1;
+      if (weight <= 1) return relation;
+      return `${relation} ×${weight}`;
+    }
+
+    function planAllEdgeRoutes(edges, nodes, maxX, maxY) {
+      const maxGx = Math.ceil(maxX / GRID_CELL);
+      const maxGy = Math.ceil(maxY / GRID_CELL);
+      const fanOrder = sortEdgesForFanOut(edges, nodes);
+      const soft = new Set();
+      const routed = [];
+
+      const sorted = [...edges].sort((a, b) => {
+        const fa = fanOrder.get(a) || { laneIndex: 0 };
+        const fb = fanOrder.get(b) || { laneIndex: 0 };
+        if (a.source !== b.source) return a.source.localeCompare(b.source);
+        return fa.laneIndex - fb.laneIndex;
+      });
+
+      for (const edge of sorted) {
         const source = nodes.find((n) => n.id === edge.source);
         const target = nodes.find((n) => n.id === edge.target);
         if (!source || !target) continue;
-        const { sx, sy, tx, ty } = edgeEndpoints(source, target);
-        const bump = bumpIndex.get(edge) || 0;
-        const label = edge.relation || "imports";
-        const lx = snap((sx + tx) / 2);
-        const ly = snap((sy + ty) / 2 - 8);
-        const pillW = Math.max(56, label.length * 6.2);
-        parts.push(`<path class="edge" style="stroke-width:${strokeW}" d="${edgePath(sx, sy, tx, ty, bump)}" />`);
-        if (viewerPrefs.debug.showPorts) {
-          parts.push(`<circle class="port-dot" cx="${snap(sx)}" cy="${snap(sy)}" r="3" />`);
-          parts.push(`<circle class="port-dot" cx="${snap(tx)}" cy="${snap(ty)}" r="3" />`);
+        const { laneIndex, laneCount } = fanOrder.get(edge) || { laneIndex: 0, laneCount: 1 };
+        let points;
+        if (viewerPrefs.display.routeAroundBoxes !== false && viewerPrefs.display.edgeStyle === "orthogonal") {
+          points = routeEdgeOnGrid(edge, source, target, laneIndex, laneCount, nodes, maxGx, maxGy, soft);
+          registerPathCorridor(points, soft);
+        } else {
+          const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+          points = [[sx, sy], [tx, ty]];
         }
-        if (viewerPrefs.layers.edgeLabels) {
+        routed.push({ edge, source, target, points });
+      }
+      return routed;
+    }
+
+    function edgesLayerSvg(edges, nodes, maxX, maxY, focus) {
+      if (!viewerPrefs.layers.edges) return "";
+      const strokeW = edgeStrokeWidth();
+      const routed = planAllEdgeRoutes(edges, nodes, maxX, maxY);
+      const accent = focus.accent || "#fbbf24";
+      const hops = detectCrossingHops(routed.map((r) => ({ edgeId: r.edge.source + "->" + r.edge.target, points: r.points })));
+      const parts = [];
+
+      for (const { edge, source, target, points } of routed) {
+        const label = edgeLabelText(edge);
+        const title = Number(edge.weight) > 1
+          ? `${edge.weight} Python import paths aggregated between these sectors (one edge)`
+          : label;
+        let d;
+        if (viewerPrefs.display.edgeStyle === "bezier") {
+          const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+          d = legacyBezierPath(sx, sy, tx, ty);
+        } else {
+          d = pathToD(points);
+        }
+        const edgeKey = `${edge.source}::${edge.target}`;
+        const isFocus = focus.active && focus.edgeKeys.has(edgeKey);
+        const dim = focus.active && viewerPrefs.display.dimUnfocused !== false && !isFocus;
+        const edgeClass = `edge${isFocus ? " focus" : ""}${dim ? " dim" : ""}`;
+        const stroke = isFocus && viewerPrefs.display.highlightConnectedEdges !== false
+          ? accent
+          : "rgba(148, 163, 184, 0.55)";
+        const sw = isFocus ? Math.max(strokeW + 1, 2.5) : strokeW;
+        parts.push(`<path class="${edgeClass}" style="stroke:${stroke};stroke-width:${sw}" d="${d}" />`);
+        if (viewerPrefs.debug.showPorts) {
+          const p0 = points[0];
+          const pN = points[points.length - 1];
+          parts.push(`<circle class="port-dot" cx="${snap(p0[0])}" cy="${snap(p0[1])}" r="3" />`);
+          parts.push(`<circle class="port-dot" cx="${snap(pN[0])}" cy="${snap(pN[1])}" r="3" />`);
+        }
+        if (viewerPrefs.layers.edgeLabels && points.length >= 2) {
+          const midIdx = Math.floor((points.length - 1) / 2);
+          const lx = snap((points[midIdx][0] + points[midIdx + 1][0]) / 2);
+          const ly = snap((points[midIdx][1] + points[midIdx + 1][1]) / 2 - 12);
+          const pillW = Math.max(72, label.length * 6.2);
           parts.push(`<rect class="edge-pill" x="${lx - pillW / 2}" y="${ly - 10}" width="${pillW}" height="18" rx="9" />`);
-          parts.push(`<text class="edge-label" x="${lx}" y="${ly + 3}">${escapeXml(label)}${edge.weight > 1 ? ` · ${edge.weight}` : ""}</text>`);
+          parts.push(`<title>${escapeXml(title)}</title>`);
+          parts.push(`<text class="edge-label" x="${lx}" y="${ly + 3}">${escapeXml(label)}</text>`);
         }
       }
+      parts.push(...hops);
       return `<g data-layer="edges">${parts.join("")}</g>`;
     }
 
-    function componentSvg(node) {
+    function componentSvg(node, focus) {
       const layout = node.layout || {};
       const metrics = node.metrics || {};
-      const fill = heatColor(metrics.static_heat || 0);
-      const selected = selectedDrilldownId === node.drilldown_id ? " selected" : "";
-      const glow = viewerPrefs.display.componentGlow ? "" : " no-glow";
-      const stubLine = viewerPrefs.display.showStubsOnBox
-        ? `<text class="component-meta" x="${layout.x + 14}" y="${layout.y + 84}">${fmt(metrics.stubs)} stubs · ${stubDensity(metrics.lines, metrics.stubs)}</text>`
+      const fill = componentFill(node);
+      const isSelected = selectedDrilldownId === node.drilldown_id;
+      const isPeer = focus.active && focus.nodeIds.has(node.id) && !isSelected;
+      const dim = focus.active && viewerPrefs.display.dimUnfocused !== false
+        && !focus.nodeIds.has(node.id);
+      const accent = focus.accent || "#fbbf24";
+      const classes = ["component"];
+      if (isSelected) classes.push("selected");
+      if (isPeer) classes.push("focus-peer");
+      if (dim) classes.push("dim");
+      const stroke = isSelected || isPeer ? accent : "rgba(148, 163, 184, 0.35)";
+      const strokeW = isSelected ? 2.5 : (isPeer ? 2 : 1);
+      const useGlow = viewerPrefs.display.componentGlow !== false && isSelected;
+      const disp = viewerPrefs.display;
+      const metaLines = [];
+      if (disp.showFilesLines !== false) {
+        metaLines.push(`${escapeHtml(node.role)} · ${fmt(metrics.files)} files`);
+        metaLines.push(`${fmt(metrics.lines)} lines`);
+      }
+      if (disp.showDeps !== false) {
+        metaLines.push(`in ${fmt(metrics.dependency_in)} / out ${fmt(metrics.dependency_out)}`);
+      }
+      if (disp.showStubs !== false) {
+        metaLines.push(`${fmt(metrics.stubs)} stubs · ${stubDensity(metrics.lines, metrics.stubs)}`);
+      }
+      const titleHtml = disp.showTitle !== false
+        ? `<div class="box-title">${escapeHtml(node.label)}</div>`
         : "";
-      return `<g class="component${selected}${glow}" data-component="${escapeXml(node.drilldown_id)}" filter="${viewerPrefs.display.componentGlow ? "url(#glow)" : "none"}">
-        <rect x="${layout.x}" y="${layout.y}" width="${layout.width}" height="${layout.height}" rx="10" fill="${fill}" />
-        <text class="component-title" x="${layout.x + 14}" y="${layout.y + 26}">${escapeXml(node.label)}</text>
-        <text class="component-meta" x="${layout.x + 14}" y="${layout.y + 48}">${escapeXml(node.role)} · ${fmt(metrics.files)} files</text>
-        <text class="component-meta" x="${layout.x + 14}" y="${layout.y + 66}">${fmt(metrics.lines)} lines · in ${fmt(metrics.dependency_in)} / out ${fmt(metrics.dependency_out)}</text>
-        ${stubLine}
+      const fo = metaLines.length
+        ? `<foreignObject x="${layout.x + 10}" y="${layout.y + 8}" width="${layout.width - 20}" height="${layout.height - 16}">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="component-fo">${titleHtml}${metaLines.map((line) => `<div class="box-meta">${line}</div>`).join("")}</div>
+          </foreignObject>`
+        : "";
+      return `<g class="${classes.join(" ")}" data-component="${escapeXml(node.drilldown_id)}" filter="${useGlow ? "url(#glow-focus)" : "none"}">
+        <rect x="${layout.x}" y="${layout.y}" width="${layout.width}" height="${layout.height}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" />
+        ${fo}
       </g>`;
     }
 
-    function componentsLayerSvg(nodes) {
+    function componentsLayerSvg(nodes, focus) {
       if (!viewerPrefs.layers.components) return "";
-      return `<g data-layer="components">${nodes.map((node) => componentSvg(node)).join("")}</g>`;
+      return `<g data-layer="components">${nodes.map((node) => componentSvg(node, focus)).join("")}</g>`;
     }
 
     function renderSystemMap() {
@@ -518,11 +975,11 @@
       const maxX = Math.max(1280, ...nodes.map((n) => (n.layout?.x || 0) + (n.layout?.width || 220) + 80));
       mapCanvas.setAttribute("viewBox", `0 0 ${maxX} ${maxY}`);
 
-      const bumpIndex = buildEdgeBumpIndex(edges);
+      const focus = buildFocusContext(nodes, edges);
       const gridLayer = gridLayerSvg(maxX, maxY);
       const lanesLayer = lanesLayerSvg(lanes);
-      const edgesLayer = edgesLayerSvg(edges, nodes, bumpIndex);
-      const componentsLayer = componentsLayerSvg(nodes);
+      const edgesLayer = edgesLayerSvg(edges, nodes, maxX, maxY, focus);
+      const componentsLayer = componentsLayerSvg(nodes, focus);
 
       const stack = viewerPrefs.display.edgesOnTop
         ? [gridLayer, lanesLayer, componentsLayer, edgesLayer]
@@ -531,6 +988,7 @@
       mapCanvas.innerHTML = `
         <defs>
           <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="glow-focus"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         </defs>
         ${stack.join("")}
       `;

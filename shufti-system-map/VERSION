@@ -1,4 +1,4 @@
-2026.05.22-milestone
-layered-viewer-v1
-orthogonal-edges-default
-sector-topology-v2
+2026.05.22-v3
+viewer-build: grid-router + color-focus
+schema: sector-topology-v2
+milestone-tag: shufti-map-2026.05.22-milestone

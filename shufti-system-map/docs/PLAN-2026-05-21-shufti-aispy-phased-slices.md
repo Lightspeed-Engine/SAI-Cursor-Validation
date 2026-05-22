@@ -542,10 +542,19 @@ Waiving a slice: add a line to **Update log** with date + reason; do not mark PA
 
 ---
 
+## Investigation backlog
+
+| Item | Notes |
+|------|--------|
+| **Shroud integration** | Investigate Shroud integration with the Shufti / system-map pipeline and MCP stack (Shroud lives under `MCP/` in Lightspeed Engine). Clarify data hooks for map layers, governance or policy signals, and whether Shroud augments topology export vs. a separate overlay channel. **Status:** investigate — after map-polish gate unless operator reprioritizes. |
+
+---
+
 ## Update log
 
 | Date | Change |
 |------|--------|
+| 2026-05-22 | Added investigation backlog: Shroud integration |
 | 2026-05-21 | Rev 1 — vague slices |
 | 2026-05-21 | Rev 2 — PASS/FAIL commands, S0 build table, S1 daemon-only scope |
 | 2026-05-21 | Rev 3 — TDD section, `tests/shufti/*`, GitHub workflow, pre-commit script |
