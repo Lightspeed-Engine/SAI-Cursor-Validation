@@ -1,0 +1,18 @@
+# Placeholder CI — expand in a later phase (offline pytest, viewer smoke).
+stages:
+  - test
+
+shufti-offline-tests:
+  stage: test
+  image: python:3.12-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+  script:
+    - pip install pytest
+    - |
+      if [ -d tests/shufti ]; then
+        pytest tests/shufti -m offline -q || pytest tests/shufti -q
+      else
+        echo "No tests/shufti in checkout; skip until wired."
+      fi
+  allow_failure: true

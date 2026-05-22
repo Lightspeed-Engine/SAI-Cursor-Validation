@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shufti Mapper UI</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">LSE Core Tooling</div>
+        <h1>Shufti Mapper</h1>
+        <p class="hero-copy">
+          Browse the repo, queue files or directories, generate maps, and publish diagrams as separate artifacts.
+        </p>
+      </div>
+      <div class="hero-meta">
+        <div class="meta-card">
+          <span class="meta-label">Bind</span>
+          <span class="meta-value" id="bind-address">loading</span>
+        </div>
+        <div class="meta-card">
+          <span class="meta-label">Repo Root</span>
+          <span class="meta-value" id="repo-root">loading</span>
+        </div>
+        <div class="meta-card">
+          <span class="meta-label">Graphviz</span>
+          <span class="meta-value" id="dot-availability">loading</span>
+        </div>
+        <div class="meta-card">
+          <span class="meta-label">Links</span>
+          <div class="meta-links">
+            <a id="logs-link" class="ghost-link" target="_blank" rel="noopener">Logs</a>
+            <a id="readme-link" class="ghost-link" target="_blank" rel="noopener">README</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <section class="panel panel-browser">
+        <div class="panel-header">
+          <h2>Filesystem</h2>
+          <button id="browse-up" class="ghost-button" type="button">Up</button>
+        </div>
+        <div class="path-row">
+          <input id="path-input" type="text" spellcheck="false" placeholder="/mnt/lightspeed-data/Lightspeed-Engine">
+          <button id="browse-go" type="button">Go</button>
+          <button id="add-manual-target" type="button">Add Target</button>
+        </div>
+        <div id="browse-status" class="status-line">Loading directory…</div>
+        <div id="browser-list" class="browser-list"></div>
+      </section>
+
+      <section class="panel panel-controls">
+        <div class="panel-header">
+          <h2>Run Controls</h2>
+          <button id="clear-targets" class="ghost-button" type="button">Clear</button>
+        </div>
+
+        <div class="target-block">
+          <div class="block-title">Targets</div>
+          <div id="target-list" class="target-list empty">No targets selected.</div>
+        </div>
+
+        <div class="target-block">
+          <div class="block-title">Compare Baseline</div>
+          <div id="compare-run-display" class="target-list empty">No baseline selected.</div>
+          <div class="action-row">
+            <button id="clear-compare-run" class="ghost-button" type="button">Clear Baseline</button>
+          </div>
+        </div>
+
+        <div class="control-grid">
+          <label>
+            <span>Mode</span>
+            <select id="mode-select">
+              <option value="auto">auto</option>
+              <option value="compose">compose (architecture)</option>
+              <option value="file">file</option>
+              <option value="app">app</option>
+            </select>
+          </label>
+          <label>
+            <span>Map Format</span>
+            <select id="format-select">
+              <option value="markdown">markdown</option>
+              <option value="json">json</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="control-section">
+          <div class="block-title">Diagram output</div>
+          <div class="control-grid">
+          <label>
+            <span>Diagram scope</span>
+            <select id="diagram-profile-select" title="filesystem = package overview + topology JSON; full = legacy dependency/class maps">
+              <option value="filesystem">filesystem (recommended)</option>
+              <option value="full">full legacy set</option>
+            </select>
+          </label>
+          <label>
+            <span>Diagram source</span>
+            <select id="diagram-format-select" title="DOT can render SVG via Graphviz; Mermaid opens in viewers">
+              <option value="dot">DOT (+ optional SVG)</option>
+              <option value="mermaid">Mermaid (.mmd)</option>
+            </select>
+          </label>
+          <label>
+            <span>Open with</span>
+            <select id="viewer-select" title="Where to open diagrams after a successful run">
+              <option value="auto">Auto (smart)</option>
+              <option value="topology-map">Shufti filesystem map</option>
+              <option value="shufti-diagram">Shufti diagram viewer</option>
+              <option value="aispy-live">AI-Spy live map</option>
+              <option value="aispy-architecture">AI-Spy architecture</option>
+            </select>
+          </label>
+          <label class="toggle-row">
+            <input id="generate-diagrams" type="checkbox" checked>
+            <span>Generate diagrams</span>
+          </label>
+          <label class="toggle-row">
+            <input id="render-svg" type="checkbox" checked>
+            <span>Render SVG when DOT</span>
+          </label>
+          <label class="toggle-row">
+            <input id="auto-open-diagrams" type="checkbox" checked>
+            <span>Open after run</span>
+          </label>
+          </div>
+        </div>
+
+        <div class="control-grid">
+          <label>
+            <span>Max Files</span>
+            <input id="max-files-input" type="number" min="1" step="1">
+          </label>
+          <label>
+            <span>Max Lines</span>
+            <input id="max-lines-input" type="number" min="100" step="100">
+          </label>
+          <label>
+            <span>Max File Bytes</span>
+            <input id="max-file-bytes-input" type="number" min="1024" step="1024">
+          </label>
+          <label>
+            <span>Timeout Seconds</span>
+            <input id="timeout-seconds-input" type="number" min="5" step="5">
+          </label>
+        </div>
+
+        <div class="action-row">
+          <button id="run-map" class="primary-button" type="button">Generate Map</button>
+        </div>
+        <div id="run-status" class="status-line">Idle.</div>
+      </section>
+
+      <section class="panel panel-preview">
+        <div class="panel-header">
+          <h2>File Preview</h2>
+          <span id="preview-path" class="panel-context">No file selected</span>
+        </div>
+        <pre id="file-preview" class="code-preview">Select a file to preview its contents.</pre>
+      </section>
+
+      <section class="panel panel-output">
+        <div class="panel-header">
+          <h2>Map Output</h2>
+          <div class="meta-links">
+            <a id="map-viewer-link" class="ghost-link hidden" target="_blank" rel="noopener">Open system map</a>
+            <a id="map-download" class="ghost-link hidden" target="_blank" rel="noopener">Markdown report</a>
+          </div>
+        </div>
+        <pre id="map-output" class="code-preview">No run yet.</pre>
+      </section>
+
+      <section class="panel panel-artifacts">
+        <div class="panel-header">
+          <h2>Artifacts</h2>
+          <span id="artifact-count" class="panel-context">0 files</span>
+        </div>
+        <div id="artifact-list" class="artifact-list empty">No generated artifacts yet.</div>
+      </section>
+
+      <section class="panel panel-artifacts">
+        <div class="panel-header">
+          <h2>Diff Artifacts</h2>
+          <span id="diff-artifact-count" class="panel-context">0 files</span>
+        </div>
+        <div id="diff-artifact-list" class="artifact-list empty">No diff artifacts yet.</div>
+      </section>
+
+      <section class="panel panel-history">
+        <div class="panel-header">
+          <h2>Recent Runs</h2>
+          <button id="refresh-runs" class="ghost-button" type="button">Refresh</button>
+        </div>
+        <div id="runs-list" class="runs-list empty">No runs loaded.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

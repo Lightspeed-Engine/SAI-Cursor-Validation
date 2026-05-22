@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture Coupling Map</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #060914;
+      --panel: rgba(17, 24, 39, 0.92);
+      --border: rgba(96, 165, 250, 0.22);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #8b5cf6;
+      --accent-soft: #60a5fa;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(139, 92, 246, 0.22), transparent 28%),
+        radial-gradient(circle at 88% 12%, rgba(59, 130, 246, 0.18), transparent 24%),
+        linear-gradient(180deg, #04060f 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    }
+
+    .shell {
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 20px 24px 32px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+      padding: 18px 20px;
+      border-radius: 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+    }
+
+    .title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tab {
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.7);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .tab.active {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.45), rgba(59, 130, 246, 0.35));
+      border-color: rgba(167, 139, 250, 0.55);
+    }
+
+    .canvas-wrap {
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--border);
+      padding: 18px;
+      min-height: calc(100vh - 180px);
+      overflow: auto;
+    }
+
+    .canvas {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 70vh;
+      padding: 12px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(9, 16, 29, 0.95));
+    }
+
+    .canvas svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* Reference-style edge pills + hatched infra nodes */
+    .canvas svg .edgeLabel rect {
+      fill: #4c1d95 !important;
+      stroke: #a78bfa !important;
+    }
+    .canvas svg .edgeLabel span,
+    .canvas svg .edgeLabel p {
+      color: #f8fafc !important;
+      font-size: 11px !important;
+    }
+    .canvas svg .node.net .label-container,
+    .canvas svg .node.bus .label-container,
+    .canvas svg .node.vol .label-container {
+      fill: url(#infraHatch) !important;
+    }
+
+    .error {
+      color: #fca5a5;
+      white-space: pre-wrap;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.9rem;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.85rem;
+      word-break: break-all;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header">
+      <div>
+        <div class="title" id="page-title">Architecture Coupling Map</div>
+        <div class="subtitle" id="page-subtitle">Shufti compose topology — demo-ready service graph</div>
+        <div class="meta" id="page-meta"></div>
+      </div>
+      <div class="tabs" id="tabs"></div>
+    </div>
+    <div class="canvas-wrap">
+      <div class="canvas" id="diagram-root"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      securityLevel: "loose",
+      themeVariables: {
+        darkMode: true,
+        background: "#060914",
+        primaryColor: "#1e3a5f",
+        primaryTextColor: "#f8fafc",
+        primaryBorderColor: "#60a5fa",
+        lineColor: "#a78bfa",
+        secondaryColor: "#312e81",
+        tertiaryColor: "#134e4a",
+        fontFamily: "Inter, Segoe UI, sans-serif",
+      },
+      flowchart: {
+        curve: "basis",
+        htmlLabels: true,
+        padding: 18,
+        nodeSpacing: 42,
+        rankSpacing: 52,
+      },
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run_id");
+    const singleSrc = params.get("src");
+    const singleName = params.get("name") || "diagram";
+
+    const tabsNode = document.getElementById("tabs");
+    const root = document.getElementById("diagram-root");
+    const metaNode = document.getElementById("page-meta");
+
+    const DIAGRAM_ORDER = [
+      ["high_level_overview", "High-level overview"],
+      ["component_coupling", "Component coupling"],
+      ["coupling_summary", "Coupling summary"],
+    ];
+
+    async function fetchText(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to load ${url}: ${response.status}`);
+      }
+      return response.text();
+    }
+
+    async function loadDiagramSet() {
+      if (singleSrc) {
+        return [{ name: singleName, label: singleName, text: await fetchText(singleSrc) }];
+      }
+      const endpoint = runId
+        ? `/api/compose/latest?run_id=${encodeURIComponent(runId)}`
+        : "/api/compose/latest";
+      const payload = await fetch(endpoint).then((response) => response.json());
+      if (!payload.ok) {
+        throw new Error(payload.error || "compose map unavailable");
+      }
+      metaNode.textContent = `${payload.compose_path || ""} • run ${payload.run_id || "unknown"}`;
+      return DIAGRAM_ORDER
+        .map(([key, label]) => {
+          const entry = payload.diagrams?.[key];
+          if (!entry?.text) return null;
+          return { name: key, label, text: entry.text, url: entry.url };
+        })
+        .filter(Boolean);
+    }
+
+    let active = 0;
+    let diagrams = [];
+
+    async function renderActive() {
+      const current = diagrams[active];
+      if (!current) {
+        root.innerHTML = '<div class="error">No diagram selected.</div>';
+        return;
+      }
+      document.getElementById("page-title").textContent = current.label;
+      root.innerHTML = `<pre class="mermaid">${current.text.replace(/</g, "&lt;")}</pre>`;
+      await mermaid.run({ nodes: root.querySelectorAll(".mermaid") });
+      const svg = root.querySelector("svg");
+      if (svg && !svg.querySelector("#infraHatch")) {
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        defs.innerHTML = `<pattern id="infraHatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="#1e1b4b"/>
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#6366f1" stroke-width="2"/>
+        </pattern>`;
+        svg.prepend(defs);
+      }
+    }
+
+    function buildTabs() {
+      tabsNode.innerHTML = "";
+      diagrams.forEach((diagram, index) => {
+        const button = document.createElement("button");
+        button.className = `tab${index === active ? " active" : ""}`;
+        button.type = "button";
+        button.textContent = diagram.label;
+        button.addEventListener("click", () => {
+          active = index;
+          buildTabs();
+          renderActive();
+        });
+        tabsNode.appendChild(button);
+      });
+    }
+
+    try {
+      diagrams = await loadDiagramSet();
+      if (!diagrams.length) {
+        root.innerHTML = '<div class="error">No compose diagrams found. Run Shufti in compose mode against standalone-deployment-docker-compose.yml.</div>';
+      } else {
+        buildTabs();
+        renderActive();
+      }
+    } catch (error) {
+      root.innerHTML = `<div class="error">${error.message}</div>`;
+    }
+  </script>
+</body>
+</html>

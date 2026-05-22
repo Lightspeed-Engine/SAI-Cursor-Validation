@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shufti System Map</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #04060f;
+      --panel: rgba(17, 24, 39, 0.94);
+      --border: rgba(139, 92, 246, 0.28);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #a78bfa;
+      --edge-pill: #4c1d95;
+      --grid-line: rgba(148, 163, 184, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(139, 92, 246, 0.2), transparent 28%),
+        radial-gradient(circle at 88% 12%, rgba(59, 130, 246, 0.14), transparent 24%),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    .shell { max-width: 2100px; margin: 0 auto; padding: 16px 20px 28px; }
+    .header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px;
+      padding: 16px 18px; border-radius: 18px; background: var(--panel);
+      border: 1px solid var(--border); margin-bottom: 14px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+    .title { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); margin-top: 6px; font-size: 0.9rem; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .tab {
+      border: 1px solid var(--border); background: rgba(15, 23, 42, 0.75);
+      color: var(--text); border-radius: 999px; padding: 8px 14px; cursor: pointer; font-size: 0.88rem;
+    }
+    .tab.active {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.45), rgba(59, 130, 246, 0.3));
+      border-color: rgba(167, 139, 250, 0.55);
+    }
+    .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .stat {
+      padding: 8px 12px; border-radius: 10px; background: var(--panel);
+      border: 1px solid var(--border); font-size: 0.82rem;
+    }
+    .stat strong { display: block; font-size: 1rem; margin-top: 2px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px 280px;
+      gap: 14px;
+      align-items: start;
+    }
+    @media (max-width: 1400px) {
+      .layout { grid-template-columns: minmax(0, 1fr) 300px; }
+      .controls-panel { grid-column: 1 / -1; }
+    }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .canvas-wrap {
+      border-radius: 20px; background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--border); padding: 12px; min-height: 72vh; overflow: auto;
+    }
+    #map-canvas { width: 100%; min-height: 68vh; display: block; }
+    .lane-label {
+      fill: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .grid-line { stroke: var(--grid-line); stroke-width: 1; }
+    .edge {
+      fill: none;
+      stroke: rgba(148, 163, 184, 0.55);
+      stroke-linecap: square;
+      stroke-linejoin: round;
+    }
+    .edge-label { fill: #f8fafc; font-size: 10px; text-anchor: middle; }
+    .edge-pill {
+      fill: var(--edge-pill);
+      stroke: var(--accent);
+      stroke-width: 1;
+    }
+    .port-dot { fill: #fbbf24; opacity: 0.85; }
+    .component { cursor: pointer; }
+    .component rect { stroke: rgba(148, 163, 184, 0.35); stroke-width: 1; }
+    .component.selected rect { stroke: #fbbf24; stroke-width: 2; }
+    .component.no-glow { filter: none; }
+    .component-title { fill: #f8fafc; font-size: 13px; font-weight: 700; }
+    .component-meta { fill: #cbd5e1; font-size: 11px; }
+    .sidebar, .controls-panel {
+      border-radius: 18px; background: var(--panel); border: 1px solid var(--border);
+      padding: 16px 18px; max-height: 80vh; overflow: auto;
+    }
+    .sidebar h2, .controls-panel h2 { margin: 0 0 8px; font-size: 1.05rem; }
+    .sidebar h3, .controls-panel h3 {
+      margin: 14px 0 8px; font-size: 0.8rem; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .control-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 6px 0; font-size: 0.82rem;
+    }
+    .control-row label { color: var(--text); flex: 1; }
+    .control-row input[type="checkbox"] { accent-color: var(--accent); }
+    .control-row select {
+      background: rgba(15, 23, 42, 0.85); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 0.8rem;
+    }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .pill-row span {
+      font-size: 0.75rem; padding: 4px 8px; border-radius: 999px;
+      background: rgba(76, 29, 149, 0.5); border: 1px solid var(--border);
+    }
+    .file-list { display: flex; flex-direction: column; gap: 8px; }
+    .file-row {
+      padding: 8px 10px; border-radius: 10px; background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.15); font-size: 0.8rem;
+    }
+    .file-row strong { display: block; color: var(--text); word-break: break-all; font-weight: 500; }
+    .file-row span { color: var(--muted); font-size: 0.75rem; }
+    .grid-sectors {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px;
+    }
+    .sector {
+      padding: 12px 14px; border-radius: 14px; background: var(--panel);
+      border: 1px solid var(--border); cursor: pointer;
+    }
+    .error { color: #fca5a5; white-space: pre-wrap; padding: 12px; }
+    .hidden { display: none !important; }
+    .panel-frame {
+      width: 100%; min-height: 70vh; border: 1px solid var(--border);
+      border-radius: 16px; background: #060914;
+    }
+    .hint { color: var(--muted); font-size: 0.75rem; line-height: 1.4; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div>
+        <div class="title">System component map</div>
+        <div class="subtitle" id="page-subtitle">Loading…</div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-view="system">System map</button>
+        <button type="button" class="tab" data-view="sectors">Sector grid</button>
+        <button type="button" class="tab" data-view="mermaid">Mermaid export</button>
+      </div>
+    </header>
+
+    <div class="stats" id="stats-row"></div>
+    <div id="error-root" class="error hidden"></div>
+
+    <section id="view-system">
+      <div class="layout">
+        <div class="canvas-wrap">
+          <svg id="map-canvas" role="img" aria-label="System component map"></svg>
+        </div>
+        <aside class="sidebar" id="sidebar">
+          <h2>Select a component</h2>
+          <p class="subtitle">Click a box on the map for files, metrics, and coupling.</p>
+        </aside>
+        <aside class="controls-panel" id="controls-panel" aria-label="Map display controls"></aside>
+      </div>
+    </section>
+
+    <section id="view-sectors" class="hidden">
+      <div class="grid-sectors" id="sector-grid"></div>
+    </section>
+
+    <section id="view-mermaid" class="hidden">
+      <iframe id="mermaid-frame" class="panel-frame" title="Filesystem overview diagram"></iframe>
+    </section>
+  </div>
+
+  <script type="module">
+    const GRID_CELL = 16;
+    const PREFS_KEY = "shufti-map-viewer-prefs-v1";
+    const DEFAULT_PREFS = {
+      layers: {
+        grid: false,
+        lanes: true,
+        edges: true,
+        edgeLabels: true,
+        components: true,
+      },
+      display: {
+        heatFill: true,
+        showStubsOnBox: true,
+        edgeStyle: "orthogonal",
+        edgeWidth: "md",
+        componentGlow: true,
+        edgesOnTop: false,
+      },
+      debug: {
+        showPorts: false,
+      },
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run_id");
+
+    const views = {
+      system: document.getElementById("view-system"),
+      sectors: document.getElementById("view-sectors"),
+      mermaid: document.getElementById("view-mermaid"),
+    };
+    const tabs = document.querySelectorAll(".tab[data-view]");
+    const subtitle = document.getElementById("page-subtitle");
+    const statsRow = document.getElementById("stats-row");
+    const sidebar = document.getElementById("sidebar");
+    const controlsPanel = document.getElementById("controls-panel");
+    const mapCanvas = document.getElementById("map-canvas");
+    const sectorGrid = document.getElementById("sector-grid");
+    const mermaidFrame = document.getElementById("mermaid-frame");
+    const errorRoot = document.getElementById("error-root");
+
+    let apiPayload = null;
+    let selectedDrilldownId = null;
+    let viewerPrefs = loadPrefs();
+
+    function loadPrefs() {
+      try {
+        const raw = localStorage.getItem(PREFS_KEY);
+        if (!raw) return structuredClone(DEFAULT_PREFS);
+        return deepMerge(structuredClone(DEFAULT_PREFS), JSON.parse(raw));
+      } catch {
+        return structuredClone(DEFAULT_PREFS);
+      }
+    }
+
+    function savePrefs() {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(viewerPrefs));
+    }
+
+    function deepMerge(base, patch) {
+      for (const [key, value] of Object.entries(patch || {})) {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          base[key] = deepMerge(base[key] || {}, value);
+        } else {
+          base[key] = value;
+        }
+      }
+      return base;
+    }
+
+    function snap(value) {
+      return Math.round(value / GRID_CELL) * GRID_CELL;
+    }
+
+    function edgeStrokeWidth() {
+      const map = { sm: 1, md: 1.5, lg: 2.75 };
+      return map[viewerPrefs.display.edgeWidth] || 1.5;
+    }
+
+    function showError(message) {
+      errorRoot.textContent = message;
+      errorRoot.classList.remove("hidden");
+    }
+
+    function setView(name) {
+      for (const [key, node] of Object.entries(views)) {
+        node.classList.toggle("hidden", key !== name);
+      }
+      for (const tab of tabs) {
+        tab.classList.toggle("active", tab.dataset.view === name);
+      }
+    }
+
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => setView(tab.dataset.view));
+    }
+
+    function escapeXml(value) {
+      return String(value ?? "").replace(/[<>&"]/g, (ch) => ({
+        "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;",
+      })[ch]);
+    }
+
+    function fmt(n) {
+      return Number(n || 0).toLocaleString();
+    }
+
+    function stubDensity(lines, stubs) {
+      const lineCount = Number(lines) || 0;
+      const stubCount = Number(stubs) || 0;
+      if (!lineCount) return "—";
+      return `${(stubCount / lineCount * 1000).toFixed(1)} / 1k lines`;
+    }
+
+    function heatColor(value) {
+      if (!viewerPrefs.display.heatFill) return "#1e293b";
+      if (value >= 0.75) return "#ea580c";
+      if (value >= 0.45) return "#2563eb";
+      if (value >= 0.18) return "#1d4ed8";
+      return "#1e293b";
+    }
+
+    function systemMapFromPayload(payload) {
+      return payload.system_map
+        || (payload.topology?.views?.system_overview)
+        || {};
+    }
+
+    function drilldownsFromPayload(payload) {
+      return payload.topology?.views?.component_drilldowns || {};
+    }
+
+    function renderControlsPanel() {
+      const layer = viewerPrefs.layers;
+      const display = viewerPrefs.display;
+      const debug = viewerPrefs.debug;
+      controlsPanel.innerHTML = `
+        <h2>Map controls</h2>
+        <p class="hint">Debug toggles persist in this browser. Release UI will expose a smaller subset.</p>
+        <h3>Layers</h3>
+        ${controlCheckbox("layers.grid", "Alignment grid", layer.grid)}
+        ${controlCheckbox("layers.lanes", "Lane labels", layer.lanes)}
+        ${controlCheckbox("layers.edges", "Dependency edges", layer.edges)}
+        ${controlCheckbox("layers.edgeLabels", "Edge labels", layer.edgeLabels)}
+        ${controlCheckbox("layers.components", "Components", layer.components)}
+        <h3>Display</h3>
+        ${controlCheckbox("display.heatFill", "Heat fill on boxes", display.heatFill)}
+        ${controlCheckbox("display.showStubsOnBox", "Stub count on boxes", display.showStubsOnBox)}
+        ${controlCheckbox("display.componentGlow", "Selection glow", display.componentGlow)}
+        ${controlCheckbox("display.edgesOnTop", "Draw edges above boxes", display.edgesOnTop)}
+        <div class="control-row">
+          <label for="edge-style">Edge routing</label>
+          <select id="edge-style" data-pref="display.edgeStyle">
+            <option value="orthogonal" ${display.edgeStyle === "orthogonal" ? "selected" : ""}>Orthogonal (reference)</option>
+            <option value="bezier" ${display.edgeStyle === "bezier" ? "selected" : ""}>Curved (legacy)</option>
+          </select>
+        </div>
+        <div class="control-row">
+          <label for="edge-width">Edge thickness</label>
+          <select id="edge-width" data-pref="display.edgeWidth">
+            <option value="sm" ${display.edgeWidth === "sm" ? "selected" : ""}>Small</option>
+            <option value="md" ${display.edgeWidth === "md" ? "selected" : ""}>Medium</option>
+            <option value="lg" ${display.edgeWidth === "lg" ? "selected" : ""}>Large</option>
+          </select>
+        </div>
+        <h3>Debug</h3>
+        ${controlCheckbox("debug.showPorts", "Show edge anchor ports", debug.showPorts)}
+      `;
+
+      controlsPanel.querySelectorAll('input[type="checkbox"][data-pref]').forEach((input) => {
+        input.addEventListener("change", () => {
+          setPrefPath(input.dataset.pref, input.checked);
+          savePrefs();
+          renderSystemMap();
+        });
+      });
+      controlsPanel.querySelectorAll("select[data-pref]").forEach((select) => {
+        select.addEventListener("change", () => {
+          setPrefPath(select.dataset.pref, select.value);
+          savePrefs();
+          renderSystemMap();
+        });
+      });
+    }
+
+    function controlCheckbox(path, label, checked) {
+      return `<div class="control-row">
+        <label for="${path}">${label}</label>
+        <input type="checkbox" id="${path}" data-pref="${path}" ${checked ? "checked" : ""} />
+      </div>`;
+    }
+
+    function setPrefPath(path, value) {
+      const parts = path.split(".");
+      let cursor = viewerPrefs;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        cursor = cursor[parts[i]];
+      }
+      cursor[parts[parts.length - 1]] = value;
+    }
+
+    function renderStats(summary, analysisRoot, componentCount, edgeCount) {
+      const items = [
+        ["Components", componentCount],
+        ["Coupling edges", edgeCount],
+        ["Files", summary.file_count],
+        ["Lines", summary.line_count],
+        ["Stubs", summary.stub_count],
+      ];
+      statsRow.innerHTML = items.map(([label, value]) => (
+        `<div class="stat"><span>${label}</span><strong>${fmt(value)}</strong></div>`
+      )).join("");
+      subtitle.textContent = `${analysisRoot || "unknown"} · fingerprint ${summary.topology_fingerprint || "n/a"}`;
+    }
+
+    function gridLayerSvg(maxX, maxY) {
+      if (!viewerPrefs.layers.grid) return "";
+      const lines = [];
+      for (let x = 0; x <= maxX; x += GRID_CELL) {
+        lines.push(`<line class="grid-line" x1="${x}" y1="0" x2="${x}" y2="${maxY}" />`);
+      }
+      for (let y = 0; y <= maxY; y += GRID_CELL) {
+        lines.push(`<line class="grid-line" x1="0" y1="${y}" x2="${maxX}" y2="${y}" />`);
+      }
+      return `<g data-layer="grid">${lines.join("")}</g>`;
+    }
+
+    function lanesLayerSvg(lanes) {
+      if (!viewerPrefs.layers.lanes) return "";
+      return `<g data-layer="lanes">${lanes.map((lane) => {
+        const x = snap(72 + (lane.order ?? 0) * 320);
+        return `<text class="lane-label" x="${x}" y="42">${escapeXml(lane.label || lane.id)}</text>`;
+      }).join("")}</g>`;
+    }
+
+    function buildEdgeBumpIndex(edges) {
+      const groups = new Map();
+      for (const edge of edges) {
+        const key = `${edge.source}::${edge.target}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(edge);
+      }
+      const bump = new Map();
+      for (const group of groups.values()) {
+        group.forEach((edge, index) => {
+          bump.set(edge, (index - (group.length - 1) / 2) * 10);
+        });
+      }
+      return bump;
+    }
+
+    function edgePath(sx, sy, tx, ty, bump) {
+      if (viewerPrefs.display.edgeStyle === "bezier") {
+        const mid = sx + Math.max(60, (tx - sx) / 2) + bump;
+        return `M ${snap(sx)} ${snap(sy)} C ${snap(mid)} ${snap(sy)}, ${snap(mid)} ${snap(ty)}, ${snap(tx)} ${snap(ty)}`;
+      }
+      const gutter = snap(sx + Math.max(48, (tx - sx) / 2) + bump);
+      if (Math.abs(ty - sy) < 8 && tx > sx) {
+        return `M ${snap(sx)} ${snap(sy)} L ${snap(tx)} ${snap(ty)}`;
+      }
+      return `M ${snap(sx)} ${snap(sy)} L ${gutter} ${snap(sy)} L ${gutter} ${snap(ty)} L ${snap(tx)} ${snap(ty)}`;
+    }
+
+    function edgeEndpoints(source, target) {
+      const sx = source.layout.x + source.layout.width;
+      const sy = source.layout.y + source.layout.height / 2;
+      const tx = target.layout.x;
+      const ty = target.layout.y + target.layout.height / 2;
+      return { sx, sy, tx, ty };
+    }
+
+    function edgesLayerSvg(edges, nodes, bumpIndex) {
+      if (!viewerPrefs.layers.edges) return "";
+      const strokeW = edgeStrokeWidth();
+      const parts = [];
+      for (const edge of edges) {
+        const source = nodes.find((n) => n.id === edge.source);
+        const target = nodes.find((n) => n.id === edge.target);
+        if (!source || !target) continue;
+        const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+        const bump = bumpIndex.get(edge) || 0;
+        const label = edge.relation || "imports";
+        const lx = snap((sx + tx) / 2);
+        const ly = snap((sy + ty) / 2 - 8);
+        const pillW = Math.max(56, label.length * 6.2);
+        parts.push(`<path class="edge" style="stroke-width:${strokeW}" d="${edgePath(sx, sy, tx, ty, bump)}" />`);
+        if (viewerPrefs.debug.showPorts) {
+          parts.push(`<circle class="port-dot" cx="${snap(sx)}" cy="${snap(sy)}" r="3" />`);
+          parts.push(`<circle class="port-dot" cx="${snap(tx)}" cy="${snap(ty)}" r="3" />`);
+        }
+        if (viewerPrefs.layers.edgeLabels) {
+          parts.push(`<rect class="edge-pill" x="${lx - pillW / 2}" y="${ly - 10}" width="${pillW}" height="18" rx="9" />`);
+          parts.push(`<text class="edge-label" x="${lx}" y="${ly + 3}">${escapeXml(label)}${edge.weight > 1 ? ` · ${edge.weight}` : ""}</text>`);
+        }
+      }
+      return `<g data-layer="edges">${parts.join("")}</g>`;
+    }
+
+    function componentSvg(node) {
+      const layout = node.layout || {};
+      const metrics = node.metrics || {};
+      const fill = heatColor(metrics.static_heat || 0);
+      const selected = selectedDrilldownId === node.drilldown_id ? " selected" : "";
+      const glow = viewerPrefs.display.componentGlow ? "" : " no-glow";
+      const stubLine = viewerPrefs.display.showStubsOnBox
+        ? `<text class="component-meta" x="${layout.x + 14}" y="${layout.y + 84}">${fmt(metrics.stubs)} stubs · ${stubDensity(metrics.lines, metrics.stubs)}</text>`
+        : "";
+      return `<g class="component${selected}${glow}" data-component="${escapeXml(node.drilldown_id)}" filter="${viewerPrefs.display.componentGlow ? "url(#glow)" : "none"}">
+        <rect x="${layout.x}" y="${layout.y}" width="${layout.width}" height="${layout.height}" rx="10" fill="${fill}" />
+        <text class="component-title" x="${layout.x + 14}" y="${layout.y + 26}">${escapeXml(node.label)}</text>
+        <text class="component-meta" x="${layout.x + 14}" y="${layout.y + 48}">${escapeXml(node.role)} · ${fmt(metrics.files)} files</text>
+        <text class="component-meta" x="${layout.x + 14}" y="${layout.y + 66}">${fmt(metrics.lines)} lines · in ${fmt(metrics.dependency_in)} / out ${fmt(metrics.dependency_out)}</text>
+        ${stubLine}
+      </g>`;
+    }
+
+    function componentsLayerSvg(nodes) {
+      if (!viewerPrefs.layers.components) return "";
+      return `<g data-layer="components">${nodes.map((node) => componentSvg(node)).join("")}</g>`;
+    }
+
+    function renderSystemMap() {
+      const systemMap = systemMapFromPayload(apiPayload);
+      const nodes = systemMap.nodes || [];
+      const edges = systemMap.edges || [];
+      const lanes = systemMap.lanes || [];
+      if (!nodes.length) {
+        mapCanvas.innerHTML = `<text x="40" y="60" fill="#94a3b8">No components in system map. Re-run map after topology export.</text>`;
+        return;
+      }
+
+      const maxY = Math.max(760, ...nodes.map((n) => (n.layout?.y || 0) + (n.layout?.height || 120) + 100));
+      const maxX = Math.max(1280, ...nodes.map((n) => (n.layout?.x || 0) + (n.layout?.width || 220) + 80));
+      mapCanvas.setAttribute("viewBox", `0 0 ${maxX} ${maxY}`);
+
+      const bumpIndex = buildEdgeBumpIndex(edges);
+      const gridLayer = gridLayerSvg(maxX, maxY);
+      const lanesLayer = lanesLayerSvg(lanes);
+      const edgesLayer = edgesLayerSvg(edges, nodes, bumpIndex);
+      const componentsLayer = componentsLayerSvg(nodes);
+
+      const stack = viewerPrefs.display.edgesOnTop
+        ? [gridLayer, lanesLayer, componentsLayer, edgesLayer]
+        : [gridLayer, lanesLayer, edgesLayer, componentsLayer];
+
+      mapCanvas.innerHTML = `
+        <defs>
+          <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        ${stack.join("")}
+      `;
+
+      mapCanvas.querySelectorAll("[data-component]").forEach((el) => {
+        el.addEventListener("click", () => {
+          selectedDrilldownId = el.getAttribute("data-component");
+          renderSystemMap();
+          renderSidebar();
+        });
+      });
+    }
+
+    function renderSidebar() {
+      const drilldowns = drilldownsFromPayload(apiPayload);
+      const selected = selectedDrilldownId ? drilldowns[selectedDrilldownId] : null;
+      if (!selected) {
+        sidebar.innerHTML = `
+          <h2>Select a component</h2>
+          <p class="subtitle">Click a box on the map for files, metrics, and coupling.</p>
+        `;
+        return;
+      }
+      const files = selected.files || [];
+      const summary = selected.summary || {};
+      sidebar.innerHTML = `
+        <h2>${escapeXml(selected.label || selected.component_id)}</h2>
+        <div class="pill-row">
+          <span>${escapeXml(selected.role || "component")}</span>
+          <span>${fmt(summary.lines)} lines</span>
+          <span>${fmt(summary.files)} files</span>
+          <span>${fmt(summary.stubs)} stubs</span>
+          <span>${stubDensity(summary.lines, summary.stubs)}</span>
+          <span>${fmt(summary.dependency_in)} deps in</span>
+          <span>${fmt(summary.dependency_out)} deps out</span>
+        </div>
+        <section>
+          <h3>Top files</h3>
+          <div class="file-list">${files.slice(0, 20).map((file) => `
+            <div class="file-row">
+              <strong>${escapeXml(file.path || "")}</strong>
+              <span>${fmt(file.lines)} lines · ${fmt(file.stub_count)} stubs · ${fmt(file.dependency_touch_count)} coupling touches</span>
+            </div>`).join("") || "<span class=\"subtitle\">No files listed.</span>"}
+        </section>
+        <section>
+          <h3>Live slots</h3>
+          <p class="subtitle">Agent pins and braid streams attach here after live layer ships.</p>
+        </section>
+      `;
+    }
+
+    function renderSectorGrid() {
+      const sectors = apiPayload.topology?.sectors || [];
+      sectorGrid.innerHTML = sectors.map((sector) => `
+        <article class="sector" data-id="${escapeXml(sector.id)}">
+          <h3>${escapeXml(sector.label || sector.id)}</h3>
+          <p class="subtitle">${fmt(sector.file_count)} files · ${fmt(sector.line_count)} lines · ${fmt(sector.stub_count)} stubs</p>
+        </article>
+      `).join("");
+    }
+
+    async function boot() {
+      if (!runId) {
+        showError("Missing run_id query parameter.");
+        return;
+      }
+      renderControlsPanel();
+      const response = await fetch(`/api/topology/latest?run_id=${encodeURIComponent(runId)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        showError(payload.error || payload.hint || `Failed to load topology (${response.status})`);
+        return;
+      }
+      apiPayload = payload;
+      const summary = payload.summary || payload.topology?.summary || {};
+      const systemMap = systemMapFromPayload(payload);
+      renderStats(
+        summary,
+        payload.analysis_root || payload.topology?.analysis_root,
+        (systemMap.nodes || []).length,
+        (systemMap.edges || []).length,
+      );
+      renderSystemMap();
+      renderSidebar();
+      renderSectorGrid();
+
+      const topologyUrl = payload.code_topology_url || "";
+      const overviewUrl = topologyUrl
+        ? topologyUrl.replace("code_topology.json", "filesystem_overview.mmd")
+        : null;
+      mermaidFrame.src = overviewUrl
+        ? `/static/architecture-viewer.html?src=${encodeURIComponent(overviewUrl)}&name=filesystem_overview`
+        : "about:blank";
+
+      if (!selectedDrilldownId && (systemMap.nodes || []).length) {
+        selectedDrilldownId = systemMap.nodes[0].drilldown_id;
+        renderSystemMap();
+        renderSidebar();
+      }
+    }
+
+    boot().catch((error) => showError(String(error)));
+  </script>
+</body>
+</html>

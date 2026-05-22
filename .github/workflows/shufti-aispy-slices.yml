@@ -1,0 +1,78 @@
+# Shufti + AI-Spy phased slice tests (PLAN-2026-05-21-shufti-aispy-phased-slices.md)
+# PR merge gate: job slice-offline must pass (S0, S2, S5).
+# Live slices (S1, S8 ports): workflow_dispatch with run_live=true only.
+
+name: Shufti AI-Spy Slices
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'tests/shufti/**'
+      - 'tests/fixtures/**'
+      - 'tests/requirements.txt'
+      - 'tests/lib/**'
+      - 'core/topology/**'
+      - 'scripts/run-shufti-slice-tests.sh'
+      - 'scripts/check-validation-stack.sh'
+      - 'docs/PLAN-2026-05-21-shufti-aispy-phased-slices.md'
+      - '.github/workflows/shufti-aispy-slices.yml'
+  pull_request:
+    paths:
+      - 'tests/shufti/**'
+      - 'tests/fixtures/**'
+      - 'tests/requirements.txt'
+      - 'tests/lib/**'
+      - 'core/topology/**'
+      - 'scripts/run-shufti-slice-tests.sh'
+      - 'scripts/check-validation-stack.sh'
+      - 'docs/PLAN-2026-05-21-shufti-aispy-phased-slices.md'
+      - '.github/workflows/shufti-aispy-slices.yml'
+  workflow_dispatch:
+    inputs:
+      run_live:
+        description: 'Run live slices (S1 + S8 port check); requires services'
+        type: boolean
+        default: false
+
+jobs:
+  slice-offline:
+    name: S0 S2 S5 (merge gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Offline slice tests
+        run: bash scripts/run-shufti-slice-tests.sh offline
+
+      - name: Upload centralized test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shufti-slice-test-log
+          path: reports/shufti-slice-latest.jsonl
+          if-no-files-found: warn
+
+  slice-live:
+    name: S1 S8 live (optional)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Live slice tests
+        env:
+          RUN_LIVE: '1'
+        run: bash scripts/run-shufti-slice-tests.sh live
