@@ -2,7 +2,14 @@
 
 Pin a release with `git tag shufti-map-<version>` after updating `VERSION` and syncing `viewer/` + `upstream/shufti_ui/topology-map-viewer.html` from Lightspeed deploy path.
 
-## 2026.05.22-v3.6-focus (current, tag `shufti-map-2026.05.22-v3.6-focus`)
+## 2026.05.22-v3.7-drilldown (current)
+
+- **Viewer:** `viewer 2026.05.22-v3.7-drilldown` in subtitle before API load; click component → **file drill-down** on canvas (grid of files + internal file edges); click empty canvas → system map
+- **Topology:** `edges.inheritance` / `dependency_layers.inheritance` from class `bases`; `module_to_sector_map` fixes basename-only sector bug (restores coupling on archived `core/` layouts)
+- **Mapper:** path-suffix import index + `direct_dependency_paths` in `collect_dependency_edges`
+- Tests: `tests/shufti/s0/test_module_to_sector.py`, `test_inheritance_edges.py`
+
+## 2026.05.22-v3.6-focus (tag `shufti-map-2026.05.22-v3.6-focus`)
 
 - **Parallel strands:** import weight → up to 12 lines per coupling (reference image semantics)
 - **Relation layers:** Coupling (violet) / External hub (dashed) / Inheritance (green, when topology emits)

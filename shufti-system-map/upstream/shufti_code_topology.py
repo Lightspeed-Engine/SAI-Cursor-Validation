@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
+import sys
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,9 +18,23 @@ from typing import Any
 
 from shufti_diagram_theme import wrap_mermaid_diagram
 
-TOPOLOGY_SCHEMA_VERSION = "1.1.0"
+TOPOLOGY_SCHEMA_VERSION = "1.2.0"
 MAX_SECTOR_FILES_LISTED = 12
 MAX_PACKAGE_EDGES = 120
+MAX_EXTERNAL_EDGES = 80
+MAX_UNRESOLVED_EDGES = 40
+MAX_INHERITANCE_EDGES = 80
+EXTERNAL_HUB_ID = "__external__"
+
+try:
+    _STDLIB_ROOTS = frozenset(sys.stdlib_module_names)
+except AttributeError:
+    _STDLIB_ROOTS = frozenset({
+        "abc", "argparse", "ast", "asyncio", "collections", "contextlib", "dataclasses",
+        "datetime", "enum", "functools", "hashlib", "importlib", "inspect", "io", "json",
+        "logging", "os", "pathlib", "re", "socket", "ssl", "subprocess", "sys", "threading",
+        "time", "typing", "unittest", "urllib", "uuid", "warnings",
+    })
 ROLE_ORDER = ("gateway", "service", "core", "data", "integration", "support")
 ROLE_HINTS = {
     "gateway": ("gateway", "api", "route", "server", "entry", "cli"),
@@ -307,10 +322,215 @@ def build_system_overview(
     }
 
 
+def import_root_from_record(record: dict[str, Any]) -> str:
+    if str(record.get("kind") or "") == "import":
+        names = record.get("names") or []
+        if names:
+            return str(names[0]).split(".")[0]
+        return ""
+    module = str(record.get("module") or "")
+    return module.split(".")[0] if module else ""
+
+
+def import_status(record: dict[str, Any]) -> str:
+    if record.get("resolved_local_targets"):
+        return "local"
+    root = import_root_from_record(record)
+    if root in _STDLIB_ROOTS:
+        return "stdlib"
+    if root:
+        return "external"
+    return "unresolved"
+
+
+def summarize_import_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "line": record.get("line"),
+        "kind": record.get("kind"),
+        "module": record.get("module"),
+        "names": record.get("names") or [],
+        "resolved_local_targets": record.get("resolved_local_targets") or [],
+        "status": import_status(record),
+        "root": import_root_from_record(record) or None,
+    }
+
+
+def relative_path_for_record(record: dict[str, Any], root: Path) -> str:
+    path = Path(str(record.get("path") or ""))
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix() if path.is_absolute() else str(record.get("path") or path.name)
+
+
+def module_to_sector_map(files: list[dict[str, Any]], root: Path) -> dict[str, str]:
+    """Map module_name → sector_id using full relative paths (not basename-only)."""
+    mapping: dict[str, str] = {}
+    for record in files:
+        module_name = str(record.get("module_name") or Path(str(record.get("path") or "")).stem)
+        relative = relative_path_for_record(record, root)
+        sector_id = sector_key_for_module(module_name, relative)
+        mapping[module_name] = sector_id
+    return mapping
+
+
+def build_class_index(files: list[dict[str, Any]]) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for record in files:
+        module_name = str(record.get("module_name") or "")
+        for class_record in record.get("classes") or []:
+            simple = str(class_record.get("qualified_name") or "").strip()
+            if not simple or not module_name:
+                continue
+            index[simple] = module_name
+            index[f"{module_name}.{simple}"] = module_name
+    return index
+
+
+def resolve_base_module(
+    base_expr: str,
+    owner_module: str,
+    class_index: dict[str, str],
+    module_to_sector: dict[str, str],
+) -> str | None:
+    base = str(base_expr or "").strip()
+    if not base:
+        return None
+    generic = base.split("[", 1)[0].strip()
+    if generic in {"object", "ABC", "ABCMeta", "TypedDict", "Protocol", "Enum"}:
+        return None
+    if generic in class_index:
+        return class_index[generic]
+    if owner_module:
+        qualified = f"{owner_module}.{generic}"
+        if qualified in class_index:
+            return class_index[qualified]
+    if "." in generic:
+        parts = generic.split(".")
+        if parts[-1] and parts[-1][0].isupper():
+            mod_candidate = ".".join(parts[:-1])
+            if mod_candidate in module_to_sector:
+                return mod_candidate
+        if generic in module_to_sector:
+            return generic
+    if owner_module and generic[0].isupper():
+        return owner_module
+    return None
+
+
+def build_inheritance_layer_edges(
+    files: list[dict[str, Any]],
+    module_to_sector: dict[str, str],
+) -> list[dict[str, Any]]:
+    class_index = build_class_index(files)
+    edge_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for record in files:
+        owner_module = str(record.get("module_name") or "")
+        child_sector = module_to_sector.get(owner_module)
+        if not child_sector:
+            continue
+        for class_record in record.get("classes") or []:
+            for base in class_record.get("bases") or []:
+                parent_module = resolve_base_module(
+                    str(base),
+                    owner_module,
+                    class_index,
+                    module_to_sector,
+                )
+                if not parent_module:
+                    continue
+                parent_sector = module_to_sector.get(parent_module)
+                if not parent_sector or parent_sector == child_sector:
+                    continue
+                edge_counts[(child_sector, parent_sector)] += 1
+    return [
+        {
+            "source": src,
+            "target": dst,
+            "weight": weight,
+            "relation": "inheritance",
+        }
+        for (src, dst), weight in sorted(
+            edge_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:MAX_INHERITANCE_EDGES]
+    ]
+
+
+def build_import_layer_edges(
+    files: list[dict[str, Any]],
+    module_to_sector: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Aggregate unresolved and third-party/stdlib import edges at component level."""
+    external_counts: dict[tuple[str, str], int] = defaultdict(int)
+    unresolved_counts: dict[tuple[str, str], int] = defaultdict(int)
+    summary = {
+        "local_import_count": 0,
+        "external_import_count": 0,
+        "stdlib_import_count": 0,
+        "unresolved_import_count": 0,
+    }
+
+    for file_record in files:
+        module_name = str(file_record.get("module_name") or "")
+        relative = str(file_record.get("path") or "")
+        sector_id = module_to_sector.get(module_name) or sector_key_for_module(module_name, relative)
+        for record in file_record.get("imports") or []:
+            if record.get("resolved_local_targets"):
+                summary["local_import_count"] += 1
+                continue
+            status = import_status(record)
+            if status == "stdlib":
+                summary["stdlib_import_count"] += 1
+                target = f"ext:stdlib:{import_root_from_record(record)}"
+                external_counts[(sector_id, target)] += 1
+            elif status == "external":
+                summary["external_import_count"] += 1
+                target = f"ext:pkg:{import_root_from_record(record)}"
+                external_counts[(sector_id, target)] += 1
+            else:
+                summary["unresolved_import_count"] += 1
+                module = str(record.get("module") or "")
+                names = record.get("names") or []
+                label = module or ",".join(str(name) for name in names) or "unknown"
+                unresolved_counts[(sector_id, f"unresolved:{label}")] += 1
+
+    external_edges = [
+        {
+            "source": source,
+            "target": EXTERNAL_HUB_ID if target.startswith("ext:") else target,
+            "weight": weight,
+            "relation": "external_import",
+            "detail": target,
+        }
+        for (source, target), weight in sorted(
+            external_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:MAX_EXTERNAL_EDGES]
+    ]
+    unresolved_edges = [
+        {
+            "source": source,
+            "target": target,
+            "weight": weight,
+            "relation": "unresolved_import",
+        }
+        for (source, target), weight in sorted(
+            unresolved_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:MAX_UNRESOLVED_EDGES]
+    ]
+    return external_edges, unresolved_edges, summary
+
+
 def build_component_drilldowns(
     components: list[dict[str, Any]],
     nodes: list[dict[str, Any]],
     file_edges: list[dict[str, Any]],
+    files: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     files_by_sector: dict[str, list[dict[str, Any]]] = defaultdict(list)
     edge_counts: dict[str, int] = defaultdict(int)
@@ -320,10 +540,19 @@ def build_component_drilldowns(
         edge_counts[str(edge.get("source") or "")] += 1
         edge_counts[str(edge.get("target") or "")] += 1
 
+    imports_by_path: dict[str, list[dict[str, Any]]] = {}
+    if files:
+        for file_record in files:
+            relative = str(file_record.get("path") or "")
+            imports_by_path[relative] = [
+                summarize_import_record(record)
+                for record in (file_record.get("imports") or [])
+            ]
+
     drilldowns: dict[str, Any] = {}
     for component in components:
         component_id = str(component.get("id") or "root")
-        files = sorted(
+        component_files = sorted(
             files_by_sector.get(component_id, []),
             key=lambda item: (
                 -edge_counts.get(str(item.get("id") or ""), 0),
@@ -353,8 +582,9 @@ def build_component_drilldowns(
                     "stubs": file_node.get("stub_count", 0),
                     "patterns": file_node.get("patterns", []),
                     "dependency_touch_count": edge_counts.get(str(file_node.get("id") or ""), 0),
+                    "imports": (imports_by_path.get(str(file_node.get("path") or "")) or [])[:24],
                 }
-                for file_node in files[:80]
+                for file_node in component_files[:80]
             ],
             "live_slots": {
                 "agents": [],
@@ -423,13 +653,7 @@ def build_code_topology(
             "fingerprint": file_fingerprint(path),
         })
 
-    module_to_sector = {
-        str(record.get("module_name") or Path(str(record.get("path") or "")).stem): sector_key_for_module(
-            str(record.get("module_name") or ""),
-            Path(str(record.get("path") or "")).name,
-        )
-        for record in files
-    }
+    module_to_sector = module_to_sector_map(files, root)
 
     file_edges: list[dict[str, str]] = []
     for src_module, dst_module in module_edges:
@@ -465,6 +689,11 @@ def build_code_topology(
             reverse=True,
         )[:MAX_PACKAGE_EDGES]
     ]
+    external_edges, unresolved_edges, import_summary = build_import_layer_edges(
+        files,
+        module_to_sector,
+    )
+    inheritance_edges = build_inheritance_layer_edges(files, module_to_sector)
 
     sectors = sorted(
         sector_stats.values(),
@@ -472,7 +701,7 @@ def build_code_topology(
     )
     components = enrich_components(sectors, nodes, package_edges)
     system_overview = build_system_overview(components, package_edges)
-    component_drilldowns = build_component_drilldowns(components, nodes, file_edges)
+    component_drilldowns = build_component_drilldowns(components, nodes, file_edges, files=files)
 
     return {
         "schema_version": TOPOLOGY_SCHEMA_VERSION,
@@ -488,6 +717,10 @@ def build_code_topology(
             "stub_count": sum(int(node["stub_count"]) for node in nodes),
             "package_edge_count": len(package_edges),
             "file_edge_count": len(file_edges),
+            "external_edge_count": len(external_edges),
+            "unresolved_edge_count": len(unresolved_edges),
+            "inheritance_edge_count": len(inheritance_edges),
+            "import_summary": import_summary,
             "topology_fingerprint": topology_fingerprint(nodes, package_edges),
         },
         "sectors": sectors,
@@ -496,6 +729,15 @@ def build_code_topology(
         "edges": {
             "files": file_edges[:500],
             "packages": package_edges,
+            "external": external_edges,
+            "unresolved": unresolved_edges,
+            "inheritance": inheritance_edges,
+        },
+        "dependency_layers": {
+            "package_import": package_edges,
+            "external_import": external_edges,
+            "unresolved_import": unresolved_edges,
+            "inheritance": inheritance_edges,
         },
         "views": {
             "system_overview": system_overview,

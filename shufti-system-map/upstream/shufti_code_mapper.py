@@ -703,30 +703,71 @@ def qualify_relative_import(current_module: str, level: int, module: str) -> str
     return ".".join(part for part in parts if part)
 
 
-def annotate_import_resolution(files: list[FileAnalysis]) -> None:
+def build_path_module_index(files: list[FileAnalysis], analysis_root: Path) -> dict[str, str]:
+    """Map dotted path suffixes and relative paths to module_name for import resolution."""
+    index: dict[str, str] = {}
+    root = analysis_root.resolve()
+    for file in files:
+        if not file.module_name:
+            continue
+        try:
+            rel = Path(file.path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            rel = Path(file.path).name
+        index[rel] = file.module_name
+        stem = rel[:-3] if rel.endswith(".py") else rel
+        if stem:
+            index[stem.replace("/", ".")] = file.module_name
+        parts = stem.split("/")
+        for idx in range(len(parts)):
+            suffix = ".".join(parts[idx:])
+            if suffix:
+                index[suffix] = file.module_name
+    return index
+
+
+def annotate_import_resolution(files: list[FileAnalysis], analysis_root: Path | None = None) -> None:
     module_map = resolve_local_imports(files)
     module_names = sorted(module_map)
+    path_index: dict[str, str] = {}
+    if files and analysis_root is not None:
+        path_index = build_path_module_index(files, analysis_root)
     for file in files:
         for record in file.imports:
             candidates: list[str] = []
             if record.kind == "import":
                 for name in record.names:
-                    candidates.extend(resolve_candidate_modules(name, module_names))
+                    candidates.extend(resolve_candidate_modules(name, module_names, path_index))
             else:
                 base = qualify_relative_import(file.module_name, record.level, record.module)
-                candidates.extend(resolve_candidate_modules(base, module_names))
+                candidates.extend(resolve_candidate_modules(base, module_names, path_index))
                 for name in record.names:
-                    candidates.extend(resolve_candidate_modules(f"{base}.{name}" if base else name, module_names))
+                    candidates.extend(resolve_candidate_modules(f"{base}.{name}" if base else name, module_names, path_index))
             record.resolved_local_targets = sorted(dict.fromkeys(candidates))
 
 
-def resolve_candidate_modules(name: str, module_names: list[str]) -> list[str]:
+def resolve_candidate_modules(
+    name: str,
+    module_names: list[str],
+    path_index: dict[str, str] | None = None,
+) -> list[str]:
     results: list[str] = []
     if not name:
         return results
+    seen: set[str] = set()
     for module_name in module_names:
         if module_name == name or module_name.startswith(f"{name}.") or name.startswith(f"{module_name}."):
-            results.append(module_name)
+            if module_name not in seen:
+                seen.add(module_name)
+                results.append(module_name)
+    if path_index:
+        dotted = name.replace("/", ".")
+        for key, module_name in path_index.items():
+            if module_name in seen:
+                continue
+            if key == dotted or key.endswith(f".{dotted}") or dotted.endswith(key):
+                seen.add(module_name)
+                results.append(module_name)
     return results
 
 
@@ -1633,11 +1674,21 @@ def write_diagram_manifest(
 
 def collect_dependency_edges(files: list[FileAnalysis]) -> list[tuple[str, str]]:
     edges: set[tuple[str, str]] = set()
+    path_to_module = {Path(file.path).resolve(): file.module_name for file in files if file.module_name}
     for file in files:
+        src = file.module_name or file.path
         for record in file.imports:
             for target in record.resolved_local_targets:
-                if target != file.module_name:
-                    edges.add((file.module_name or file.path, target))
+                if target and target != file.module_name:
+                    edges.add((src, target))
+        for dep_str in file.direct_dependency_paths:
+            try:
+                dep_path = Path(dep_str).resolve()
+            except (OSError, ValueError):
+                continue
+            target_mod = path_to_module.get(dep_path)
+            if target_mod and target_mod != file.module_name:
+                edges.add((src, target_mod))
     return sorted(edges)
 
 
@@ -1754,7 +1805,7 @@ def main() -> int:
         analyses.append(analysis)
     if not analyses:
         raise ValueError("no analyzable Python files remained after error recovery")
-    annotate_import_resolution(analyses)
+    annotate_import_resolution(analyses, analysis_root)
     header = build_header(effective_mode, args.targets, analyses, analysis_errors)
 
     rendered = (

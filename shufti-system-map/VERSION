@@ -1,4 +1,4 @@
-2026.05.22-v3.6-focus
-viewer-build: strand-coupling + relation-layer-toggles + focus-dim + sidebar-coupling-click
-topology-schema: 1.2.0 (inheritance layer ready; mapper emission pending)
-prior-tag: shufti-map-2026.05.22-v3.2
+2026.05.22-v3.7-drilldown
+viewer-build: early build stamp + canvas file drill-down on box click
+topology: inheritance edges + module_to_sector path fix + import path index
+prior-tag: shufti-map-2026.05.22-v3.6-focus

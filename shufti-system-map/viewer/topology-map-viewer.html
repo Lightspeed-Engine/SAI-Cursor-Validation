@@ -211,7 +211,7 @@
     <header class="header">
       <div>
         <div class="title">System component map</div>
-        <div class="subtitle" id="page-subtitle">Loading…</div>
+        <div class="subtitle" id="page-subtitle">viewer build loading…</div>
       </div>
       <div class="tabs" role="tablist">
         <button type="button" class="tab active" data-view="system">System map</button>
@@ -251,7 +251,7 @@
     const EDGE_LANE_SPACING = 14;
     const GUTTER_OUT = 22;
     const GUTTER_IN = 22;
-    const VIEWER_BUILD = "2026.05.22-v3.6-focus";
+    const VIEWER_BUILD = "2026.05.22-v3.7-drilldown";
     const MAX_STRANDS_PER_COUPLING = 12;
     const EXTERNAL_HUB_ID = "__external__";
     /** Default stroke/label per edge relation (inheritance reserved for future topology). */
@@ -369,7 +369,15 @@
     let selectedDrilldownId = null;
     /** When set, focus only this coupling's strands (source → target). */
     let selectedCouplingRef = null;
+    /** @type {"system"|"files"} */
+    let mapCanvasMode = "system";
     let viewerPrefs = loadPrefs();
+
+    function setSubtitleLoading() {
+      const rid = runId || "(missing run_id)";
+      subtitle.textContent = `viewer ${VIEWER_BUILD} · run ${rid} · loading topology…`;
+    }
+    setSubtitleLoading();
 
     function loadPrefs() {
       try {
@@ -1337,7 +1345,95 @@
       return `<g data-layer="components">${nodes.map((node) => componentSvg(node, focus)).join("")}</g>`;
     }
 
+    function fileEdgesFromTopology() {
+      const topo = apiPayload?.topology || {};
+      return (topo.edges || {}).files || [];
+    }
+
+    function renderFileDrillMap() {
+      const drilldowns = drilldownsFromPayload(apiPayload);
+      const selected = selectedDrilldownId ? drilldowns[selectedDrilldownId] : null;
+      if (!selected) {
+        mapCanvasMode = "system";
+        renderSystemMap();
+        return;
+      }
+      const files = selected.files || [];
+      const pathSet = new Set(files.map((f) => f.path));
+      const rawEdges = fileEdgesFromTopology().filter(
+        (e) => pathSet.has(e.source) && pathSet.has(e.target),
+      );
+      const cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(files.length || 1))));
+      const boxW = 200;
+      const boxH = 64;
+      const gapX = 28;
+      const gapY = 24;
+      const nodes = files.map((file, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        const shortName = (file.path || "").split("/").pop() || file.path;
+        return {
+          id: file.path,
+          path: file.path,
+          shortName,
+          layout: {
+            x: 48 + col * (boxW + gapX),
+            y: 72 + row * (boxH + gapY),
+            width: boxW,
+            height: boxH,
+          },
+          lines: file.lines,
+          stubs: file.stubs,
+        };
+      });
+      const nodeByPath = new Map(nodes.map((n) => [n.id, n]));
+      const edges = rawEdges.map((e) => ({
+        source: e.source,
+        target: e.target,
+        relation: e.relation || "imports",
+      }));
+
+      const maxX = Math.max(900, ...nodes.map((n) => n.layout.x + n.layout.width + 80));
+      const maxY = Math.max(520, ...nodes.map((n) => n.layout.y + n.layout.height + 80));
+      mapCanvas.setAttribute("viewBox", `0 0 ${maxX} ${maxY}`);
+
+      const accent = viewerPrefs.display.focusColor || "#fbbf24";
+      const edgeParts = edges.map((edge) => {
+        const source = nodeByPath.get(edge.source);
+        const target = nodeByPath.get(edge.target);
+        if (!source || !target) return "";
+        const sx = source.layout.x + source.layout.width;
+        const sy = source.layout.y + source.layout.height / 2;
+        const tx = target.layout.x;
+        const ty = target.layout.y + target.layout.height / 2;
+        const midX = (sx + tx) / 2;
+        const d = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`;
+        return `<path class="edge focus" fill="none" stroke="${accent}" stroke-width="2" d="${d}"><title>${escapeXml(edge.source)} → ${escapeXml(edge.target)}</title></path>`;
+      }).join("");
+
+      const fileBoxes = nodes.map((node) => {
+        const l = node.layout;
+        return `<g class="component focus-peer" data-file-path="${escapeXml(node.path)}">
+          <rect x="${l.x}" y="${l.y}" width="${l.width}" height="${l.height}" rx="8"
+            fill="rgba(30,41,59,0.95)" stroke="${accent}" stroke-width="1.5" />
+          <text x="${l.x + 10}" y="${l.y + 22}" fill="#f8fafc" font-size="11" font-weight="600">${escapeXml(node.shortName)}</text>
+          <text x="${l.x + 10}" y="${l.y + 40}" fill="#94a3b8" font-size="10">${fmt(node.lines)} lines · ${fmt(node.stubs)} stubs</text>
+        </g>`;
+      }).join("");
+
+      mapCanvas.innerHTML = `
+        <text x="40" y="36" fill="#a78bfa" font-size="14" font-weight="600">File drill-down: ${escapeXml(selected.label || selected.component_id)}</text>
+        <text x="40" y="54" fill="#94a3b8" font-size="11">Click empty area to return to system map · ${files.length} files · ${edges.length} internal file edge(s)</text>
+        <g data-layer="file-edges">${edgeParts}</g>
+        <g data-layer="file-nodes">${fileBoxes}</g>
+      `;
+    }
+
     function renderSystemMap() {
+      if (mapCanvasMode === "files" && selectedDrilldownId) {
+        renderFileDrillMap();
+        return;
+      }
       const systemMap = systemMapFromPayload(apiPayload);
       let nodes = systemMap.nodes || [];
       const edges = systemMap.edges || [];
@@ -1392,14 +1488,16 @@
           event.stopPropagation();
           selectedDrilldownId = el.getAttribute("data-component");
           selectedCouplingRef = null;
+          mapCanvasMode = "files";
           renderSystemMap();
           renderSidebar();
         });
       });
       mapCanvas.addEventListener("click", () => {
-        if (!selectedDrilldownId && !selectedCouplingRef) return;
+        if (!selectedDrilldownId && !selectedCouplingRef && mapCanvasMode === "system") return;
         selectedDrilldownId = null;
         selectedCouplingRef = null;
+        mapCanvasMode = "system";
         renderSystemMap();
         renderSidebar();
       });
@@ -1528,6 +1626,7 @@
 
     async function boot() {
       if (!runId) {
+        subtitle.textContent = `viewer ${VIEWER_BUILD} · missing run_id query parameter`;
         showError("Missing run_id query parameter.");
         return;
       }
