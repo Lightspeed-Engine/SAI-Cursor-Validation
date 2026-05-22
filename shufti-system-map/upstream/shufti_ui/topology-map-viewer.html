@@ -99,9 +99,11 @@
     .component-fo .box-meta { font-size: 10px; color: #cbd5e1; margin-top: 2px; }
     .edge {
       fill: none;
-      stroke: rgba(148, 163, 184, 0.55);
+      stroke: rgba(186, 198, 216, 0.92);
+      stroke-width: 2;
       stroke-linecap: square;
       stroke-linejoin: round;
+      pointer-events: stroke;
     }
     .edge-hop {
       fill: none;
@@ -120,7 +122,7 @@
     .component.selected rect { stroke-width: 2.5; }
     .component.focus-peer rect { stroke-width: 2; }
     .component.dim { opacity: 0.28; }
-    .edge.dim { opacity: 0.14; }
+    .edge.dim { opacity: 0.35; }
     .edge.focus { opacity: 1; }
     .color-swatch {
       display: inline-block; width: 10px; height: 10px; border-radius: 3px;
@@ -221,7 +223,7 @@
     const EDGE_LANE_SPACING = 14;
     const GUTTER_OUT = 22;
     const GUTTER_IN = 22;
-    const VIEWER_BUILD = "2026.05.22-v3";
+    const VIEWER_BUILD = "2026.05.22-v3.2";
     const PREFS_KEY = "shufti-map-viewer-prefs-v2";
     const ROLE_COLORS = {
       gateway: "#7c3aed",
@@ -252,14 +254,14 @@
         showDeps: true,
         showStubs: true,
         edgeStyle: "orthogonal",
-        edgeWidth: "md",
+        edgeWidth: "lg",
         colorMode: "heat",
         focusHighlight: true,
         highlightConnectedEdges: true,
-        dimUnfocused: true,
+        dimUnfocused: false,
         focusColor: "#fbbf24",
         componentGlow: true,
-        edgesOnTop: false,
+        edgesOnTop: true,
         routeAroundBoxes: true,
         edgeHops: true,
       },
@@ -298,6 +300,15 @@
         if (parsed.display?.showStubsOnBox !== undefined && parsed.display.showStubs === undefined) {
           parsed.display.showStubs = parsed.display.showStubsOnBox;
         }
+        // v3.1: edges drawn under boxes were invisible; default is now on-top.
+        if (parsed.display?.edgesOnTop === false) {
+          parsed.display.edgesOnTop = true;
+        }
+        // v3.2: dim-unfocused default off (was confusing on open).
+        if (parsed.display?.dimUnfocused === true && parsed.display?._dimDefaultV32 !== true) {
+          parsed.display.dimUnfocused = false;
+          parsed.display._dimDefaultV32 = true;
+        }
         return deepMerge(structuredClone(DEFAULT_PREFS), parsed);
       } catch {
         return structuredClone(DEFAULT_PREFS);
@@ -324,8 +335,22 @@
     }
 
     function edgeStrokeWidth() {
-      const map = { sm: 1, md: 1.5, lg: 2.75 };
-      return map[viewerPrefs.display.edgeWidth] || 1.5;
+      const map = { sm: 1.5, md: 2.25, lg: 3.25 };
+      return map[viewerPrefs.display.edgeWidth] || 2.25;
+    }
+
+    function pathLength(points) {
+      let total = 0;
+      for (let i = 1; i < points.length; i += 1) {
+        total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+      }
+      return total;
+    }
+
+    function isBackwardEdge(source, target) {
+      const srcRight = source.layout.x + source.layout.width;
+      const tgtLeft = target.layout.x;
+      return tgtLeft < srcRight - 4;
     }
 
     function showError(message) {
@@ -420,10 +445,33 @@
       )).join("");
     }
 
+    function packageEdgesFromTopology(topology) {
+      const raw = (topology?.edges || {}).packages || [];
+      return raw.map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        weight: edge.weight ?? 1,
+        relation: edge.relation || "package_import",
+      })).filter((edge) => edge.source && edge.target);
+    }
+
     function systemMapFromPayload(payload) {
-      return payload.system_map
+      const base = payload.system_map
         || (payload.topology?.views?.system_overview)
         || {};
+      const nodes = base.nodes || [];
+      const nodeIds = new Set(nodes.map((n) => n.id));
+      let edges = base.edges || [];
+      if (!edges.length && payload.topology) {
+        const fromView = (payload.topology.views || {}).system_overview?.edges || [];
+        if (fromView.length) edges = fromView;
+        else {
+          edges = packageEdgesFromTopology(payload.topology).filter(
+            (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
+          );
+        }
+      }
+      return { ...base, nodes, edges };
     }
 
     function drilldownsFromPayload(payload) {
@@ -467,12 +515,12 @@
         </div>
         ${controlCheckbox("display.focusHighlight", "Highlight selected service + neighbors", display.focusHighlight !== false)}
         ${controlCheckbox("display.highlightConnectedEdges", "Color connected edges", display.highlightConnectedEdges !== false)}
-        ${controlCheckbox("display.dimUnfocused", "Dim everything else", display.dimUnfocused !== false)}
+        ${controlCheckbox("display.dimUnfocused", "Dim non-neighbors when a box is selected", display.dimUnfocused === true)}
         ${controlCheckbox("display.componentGlow", "Glow on selected box", display.componentGlow !== false)}
         <h3>Display</h3>
         ${controlCheckbox("display.routeAroundBoxes", "Grid path (avoid box borders)", display.routeAroundBoxes !== false)}
         ${controlCheckbox("display.edgeHops", "Hop arcs when edges cross", display.edgeHops !== false)}
-        ${controlCheckbox("display.edgesOnTop", "Draw edges above boxes", display.edgesOnTop)}
+        ${controlCheckbox("display.edgesOnTop", "Draw edges above boxes", display.edgesOnTop !== false)}
         <div class="control-row">
           <label for="edge-style">Edge routing</label>
           <select id="edge-style" data-pref="display.edgeStyle">
@@ -853,11 +901,17 @@
         if (!source || !target) continue;
         const { laneIndex, laneCount } = fanOrder.get(edge) || { laneIndex: 0, laneCount: 1 };
         let points;
-        if (viewerPrefs.display.routeAroundBoxes !== false && viewerPrefs.display.edgeStyle === "orthogonal") {
+        const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+        const useOrthogonal = viewerPrefs.display.routeAroundBoxes !== false
+          && viewerPrefs.display.edgeStyle === "orthogonal"
+          && !isBackwardEdge(source, target);
+        if (useOrthogonal) {
           points = routeEdgeOnGrid(edge, source, target, laneIndex, laneCount, nodes, maxGx, maxGy, soft);
+          if (pathLength(points) < 24) {
+            points = [[sx, sy], [tx, ty]];
+          }
           registerPathCorridor(points, soft);
         } else {
-          const { sx, sy, tx, ty } = edgeEndpoints(source, target);
           points = [[sx, sy], [tx, ty]];
         }
         routed.push({ edge, source, target, points });
@@ -878,22 +932,24 @@
         const title = Number(edge.weight) > 1
           ? `${edge.weight} Python import paths aggregated between these sectors (one edge)`
           : label;
-        let d;
-        if (viewerPrefs.display.edgeStyle === "bezier") {
-          const { sx, sy, tx, ty } = edgeEndpoints(source, target);
-          d = legacyBezierPath(sx, sy, tx, ty);
-        } else {
-          d = pathToD(points);
-        }
+        const { sx, sy, tx, ty } = edgeEndpoints(source, target);
+        const useBezier = viewerPrefs.display.edgeStyle === "bezier"
+          || isBackwardEdge(source, target)
+          || pathLength(points) < 24;
+        const d = useBezier ? legacyBezierPath(sx, sy, tx, ty) : pathToD(points);
         const edgeKey = `${edge.source}::${edge.target}`;
         const isFocus = focus.active && focus.edgeKeys.has(edgeKey);
-        const dim = focus.active && viewerPrefs.display.dimUnfocused !== false && !isFocus;
+        const dim = focus.active
+          && focus.edgeKeys.size > 0
+          && viewerPrefs.display.dimUnfocused !== false
+          && !isFocus;
         const edgeClass = `edge${isFocus ? " focus" : ""}${dim ? " dim" : ""}`;
         const stroke = isFocus && viewerPrefs.display.highlightConnectedEdges !== false
           ? accent
-          : "rgba(148, 163, 184, 0.55)";
-        const sw = isFocus ? Math.max(strokeW + 1, 2.5) : strokeW;
-        parts.push(`<path class="${edgeClass}" style="stroke:${stroke};stroke-width:${sw}" d="${d}" />`);
+          : "#94a3b8";
+        const sw = isFocus ? Math.max(strokeW + 1, 3) : strokeW;
+        const opacity = dim ? 0.45 : 0.95;
+        parts.push(`<path class="${edgeClass}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-opacity="${opacity}" d="${d}" />`);
         if (viewerPrefs.debug.showPorts) {
           const p0 = points[0];
           const pN = points[points.length - 1];
@@ -911,7 +967,11 @@
         }
       }
       parts.push(...hops);
-      return `<g data-layer="edges">${parts.join("")}</g>`;
+      const drawn = routed.length;
+      const badge = drawn
+        ? `<text x="12" y="18" fill="#94a3b8" font-size="11">${drawn} coupling edge${drawn === 1 ? "" : "s"} drawn</text>`
+        : "";
+      return `<g data-layer="edges">${badge}${parts.join("")}</g>`;
     }
 
     function componentSvg(node, focus) {
@@ -970,6 +1030,9 @@
         mapCanvas.innerHTML = `<text x="40" y="60" fill="#94a3b8">No components in system map. Re-run map after topology export.</text>`;
         return;
       }
+      const edgeNotice = !edges.length
+        ? `<text x="40" y="28" fill="#fbbf24" font-size="14" font-weight="600">No coupling edges in run ${escapeXml(runId || "unknown")}. Stats show Coupling edges: 0 — pick another run (e.g. 20260522T160033Z-a6686131 has 47).</text>`
+        : "";
 
       const maxY = Math.max(760, ...nodes.map((n) => (n.layout?.y || 0) + (n.layout?.height || 120) + 100));
       const maxX = Math.max(1280, ...nodes.map((n) => (n.layout?.x || 0) + (n.layout?.width || 220) + 80));
@@ -990,15 +1053,23 @@
           <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
           <filter id="glow-focus"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         </defs>
+        ${edgeNotice}
         ${stack.join("")}
       `;
 
       mapCanvas.querySelectorAll("[data-component]").forEach((el) => {
-        el.addEventListener("click", () => {
+        el.addEventListener("click", (event) => {
+          event.stopPropagation();
           selectedDrilldownId = el.getAttribute("data-component");
           renderSystemMap();
           renderSidebar();
         });
+      });
+      mapCanvas.addEventListener("click", () => {
+        if (!selectedDrilldownId) return;
+        selectedDrilldownId = null;
+        renderSystemMap();
+        renderSidebar();
       });
     }
 
@@ -1083,11 +1154,6 @@
         ? `/static/architecture-viewer.html?src=${encodeURIComponent(overviewUrl)}&name=filesystem_overview`
         : "about:blank";
 
-      if (!selectedDrilldownId && (systemMap.nodes || []).length) {
-        selectedDrilldownId = systemMap.nodes[0].drilldown_id;
-        renderSystemMap();
-        renderSidebar();
-      }
     }
 
     boot().catch((error) => showError(String(error)));

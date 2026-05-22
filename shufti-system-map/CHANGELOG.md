@@ -2,7 +2,16 @@
 
 Pin a release with `git tag shufti-map-<version>` after updating `VERSION` and syncing `viewer/` + `upstream/shufti_ui/topology-map-viewer.html` from Lightspeed deploy path.
 
-## 2026.05.22-v3 (current)
+## 2026.05.22-v3.2 (current)
+
+- **Edges visible:** draw above boxes by default; brighter SVG strokes; backward imports use curved routes
+- **Dim non-neighbors** off by default (was confusing on open); only dims when selection has connected edges
+- **Zero-edge runs:** banner shows `run_id` and hints to pick a run with coupling data
+- `systemMapFromPayload` falls back to `topology.edges.packages` when `system_map.edges` empty
+- Map badge: `N coupling edges drawn`; click empty canvas clears selection
+- `VIEWER_BUILD` stamp in subtitle for rollback checks
+
+## 2026.05.22-v3 (tag `shufti-map-2026.05.22-v3`)
 
 - Grid A* routing with obstacle avoidance (no paths through box borders)
 - Edge crossing hop arcs (inverted-U style)
@@ -21,7 +30,13 @@ Pin a release with `git tag shufti-map-<version>` after updating `VERSION` and s
 ## Rollback
 
 ```bash
-# Git (validation repo)
+# Git (validation repo) — one step back
+git checkout shufti-map-2026.05.22-v3 -- shufti-system-map/viewer/topology-map-viewer.html
+cp shufti-system-map/viewer/topology-map-viewer.html \
+  /mnt/lightspeed-data/Lightspeed-Engine/LSE-Core-2.0-2.1/scripts/shufti_ui/topology-map-viewer.html
+./scripts/restart-shufti-ui.sh
+
+# Milestone (layered viewer v1)
 git checkout shufti-map-2026.05.22-milestone -- shufti-system-map/viewer/topology-map-viewer.html
 cp shufti-system-map/viewer/topology-map-viewer.html \
   /mnt/lightspeed-data/Lightspeed-Engine/LSE-Core-2.0-2.1/scripts/shufti_ui/topology-map-viewer.html
